@@ -1,0 +1,85 @@
+[project]
+name = "io-2026s"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "markupsafe==3.0.2",
+    "matplotlib>=3.10.8",
+    "torch",
+    "torchvision",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+fix = true
+show-fixes = true
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "UP", "SIM", "RET", "RUF", "PL"]
+
+ignore = [
+    # Conflicts with formatter or impractical rules
+    "COM812",  # trailing comma missing (formatter handles)
+    "ISC001",  # implicit string concat
+    "D203",    # one-blank-line-before-class (conflicts with D211)
+    "D212",    # multi-line-summary-first-line (conflicts with D213)
+]
+
+fixable = ["ALL"]
+unfixable = []
+
+preview = true
+
+# Fail CI if any rule violated
+extend-select = [
+    "B",    # bugbear
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "C4",   # comprehensions
+    "SIM",  # simplifications
+    "RET",  # return rules
+    "ARG",  # unused args
+    "PTH",  # pathlib usage
+    "ERA",  # commented-out code
+    "PL",   # pylint
+    "RUF",  # ruff-native rules
+]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple/"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",  # allow assert
+    "PLR2004",  # magic values allowed in tests
+    "D",  # ignore docstring rules in tests
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+# [dependency-groups]
+# dev = [
+#     "ruff>=0.15.2",
+# ]
