@@ -1,15 +1,21 @@
 [project]
 name = "io-2026s"
 version = "0.1.0"
-description = "Add your description here"
+description = "Common due date scheduling with RL (PPO agent)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "graphviz>=0.21",
     "markupsafe==3.0.2",
     "matplotlib>=3.10.8",
     "torch",
     "torchvision",
+    "numpy",
+    "pandas>=2.3.3",
 ]
+
+[project.scripts]
+io-2026s = "src:main"
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -18,6 +24,9 @@ url = "https://download.pytorch.org/whl/cpu"
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
+
+[tool.setuptools]
+packages = ["src"]
 
 
 [tool.ruff]
@@ -79,7 +88,8 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
-# [dependency-groups]
-# dev = [
-#     "ruff>=0.15.2",
-# ]
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.15.2",
+]

@@ -54,12 +54,125 @@ from pathlib import Path
 from typing import Sequence
 
 import matplotlib.pyplot as plt
+import matplotlib.axes
 import matplotlib.patches as mpatches
 from matplotlib.patches import Rectangle
+from matplotlib.animation import FuncAnimation
 import numpy as np
 
-from orlib_sch import SchInstance
-from sch_rl import PPOAgent
+try:
+    from .orlib_sch import SchInstance
+except ImportError:
+    from orlib_sch import SchInstance
+
+# ---------------------------------------------------------------------------
+# Color palette
+# ---------------------------------------------------------------------------
+
+_PALETTE = {
+    "early": "#2ecc71",      # Green
+    "late": "#e74c3c",       # Red
+    "on_time": "#f1c40f",    # Yellow
+}
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _compute_job_timeline(instance: SchInstance, schedule: Sequence[int], h: float) -> list[dict]:
+    """
+    Compute timeline data for each job in the schedule.
+
+    Returns a list of dicts with keys:
+        job_idx, rank, start, end, duration, color, early_cost, late_cost
+    """
+    d = instance.due_date(h)
+    jobs_data = []
+    time = 0
+
+    for rank, job_idx in enumerate(schedule):
+        job = instance.jobs[job_idx]
+        start = time
+        end = time + job.p
+
+        # Determine color based on due-date relationship
+        if end == d:
+            color = _PALETTE["on_time"]
+        elif end < d:
+            color = _PALETTE["early"]
+        else:
+            color = _PALETTE["late"]
+
+        jobs_data.append({
+            "job_idx": job_idx,
+            "rank": rank,
+            "start": start,
+            "end": end,
+            "duration": job.p,
+            "color": color,
+            "early_cost": job.a * max(0, d - end),
+            "late_cost": job.b * max(0, end - d),
+        })
+        time = end
+
+    return jobs_data
+
+
+def _draw_gantt_on_ax(ax: matplotlib.axes.Axes, instance: SchInstance, schedule: Sequence[int], h: float) -> None:
+    """Draw a Gantt chart onto an existing axes."""
+    d = instance.due_date(h)
+    n = len(schedule)
+    jobs_data = _compute_job_timeline(instance, schedule, h)
+
+    # Create bars
+    for data in jobs_data:
+        rect = Rectangle(
+            (data["start"], data["rank"] - 0.4),
+            data["duration"],
+            0.8,
+            facecolor=data["color"],
+            edgecolor="black",
+            linewidth=1.5,
+        )
+        ax.add_patch(rect)
+
+        # Add job index and processing time text
+        mid_x = data["start"] + data["duration"] / 2
+        ax.text(
+            mid_x,
+            data["rank"],
+            f"J{data['job_idx']}\n(p={data['duration']})",
+            ha="center",
+            va="center",
+            fontsize=9,
+            fontweight="bold",
+            color="white",
+        )
+
+    # Due date vertical line
+    ax.axvline(d, color="navy", linewidth=2.5, linestyle="--", label=f"Due date d={d}")
+
+    # Formatting
+    y_positions = list(range(n))
+    ax.set_ylim(-0.5, n - 0.5)
+    ax.set_xlim(-0.5, instance.sum_p + 0.5)
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels([f"Rank {i}" for i in y_positions])
+    ax.set_xlabel("Completion Time", fontsize=12, fontweight="bold")
+    ax.set_ylabel("Execution Order", fontsize=12, fontweight="bold")
+    ax.grid(axis="x", alpha=0.3, linestyle=":", linewidth=0.8)
+
+    # Legend
+    early_patch = mpatches.Patch(color=_PALETTE["early"], label="Early (penalty: earliness)")
+    late_patch = mpatches.Patch(color=_PALETTE["late"], label="Late (penalty: tardiness)")
+    on_time_patch = mpatches.Patch(color=_PALETTE["on_time"], label="On-time")
+    ax.legend(
+        handles=[early_patch, late_patch, on_time_patch],
+        loc="upper right",
+        fontsize=10,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -107,102 +220,23 @@ def plot_gantt_chart(
     fig, ax = plt.subplots(figsize=figsize)
 
     d = instance.due_date(h)
-    n = len(schedule)
-    colors = []
-    time = 0
-    y_positions = list(range(n))
-
-    # Compute timeline and colors for each job
-    jobs_data = []
-    for rank, job_idx in enumerate(schedule):
-        job = instance.jobs[job_idx]
-        start = time
-        end = time + job.p
-        is_early = end <= d
-        is_late = end > d
-
-        # Color: green for early, red for late, yellow for on-time
-        if is_early:
-            color = "#2ecc71"  # Green
-        elif end == d:
-            color = "#f1c40f"  # Yellow
-        else:
-            color = "#e74c3c"  # Red
-
-        jobs_data.append({
-            "job_idx": job_idx,
-            "rank": rank,
-            "start": start,
-            "end": end,
-            "duration": job.p,
-            "color": color,
-            "is_early": is_early,
-            "is_late": is_late,
-            "early_cost": job.a * max(0, d - end),
-            "late_cost": job.b * max(0, end - d),
-        })
-
-        time = end
-
-    # Create bars
-    for data in jobs_data:
-        rect = Rectangle(
-            (data["start"], data["rank"] - 0.4),
-            data["duration"],
-            0.8,
-            facecolor=data["color"],
-            edgecolor="black",
-            linewidth=1.5,
-        )
-        ax.add_patch(rect)
-
-        # Add job index and processing time text
-        mid_x = data["start"] + data["duration"] / 2
-        ax.text(
-            mid_x,
-            data["rank"],
-            f"J{data['job_idx']}\n(p={data['duration']})",
-            ha="center",
-            va="center",
-            fontsize=9,
-            fontweight="bold",
-            color="white",
-        )
-
-    # Due date vertical line
-    ax.axvline(d, color="navy", linewidth=2.5, linestyle="--", label=f"Due date d={d}")
-
-    # Formatting
-    ax.set_ylim(-0.5, n - 0.5)
-    ax.set_xlim(-0.5, instance.sum_p + 0.5)
-    ax.set_yticks(y_positions)
-    ax.set_yticklabels([f"Rank {i}" for i in y_positions])
-    ax.set_xlabel("Completion Time", fontsize=12, fontweight="bold")
-    ax.set_ylabel("Execution Order", fontsize=12, fontweight="bold")
-
-    title = f"Gantt Chart  (n={instance.n}, h={h}, d={d})"
     total_cost = instance.evaluate(schedule, h)
+
+    # Draw Gantt chart using shared helper
+    _draw_gantt_on_ax(ax, instance, schedule, h)
+
+    # Add title with total cost
+    title = f"Gantt Chart  (n={instance.n}, h={h}, d={d})"
     title += f"\nTotal Cost = {total_cost}"
     ax.set_title(title, fontsize=14, fontweight="bold")
 
-    ax.grid(axis="x", alpha=0.3, linestyle=":", linewidth=0.8)
-
-    # Legend
-    early_patch = mpatches.Patch(color="#2ecc71", label="Early (penalty: earliness)")
-    late_patch = mpatches.Patch(color="#e74c3c", label="Late (penalty: tardiness)")
-    on_time_patch = mpatches.Patch(color="#f1c40f", label="On-time")
-    ax.legend(
-        handles=[early_patch, late_patch, on_time_patch],
-        loc="upper right",
-        fontsize=10,
-    )
-
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path is not None:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[visualize] Saved Gantt chart to {save_path}")
     if show:
         plt.show()
+    plt.close(fig)
 
     return fig, ax
 
@@ -217,7 +251,7 @@ def plot_cost_breakdown(
     schedule: Sequence[int],
     h: float = 0.4,
     *,
-    figsize: tuple[float, float] = (12, 6),
+    figsize: tuple[float, float] = (14, 10),
     save_path: str | Path | None = None,
     show: bool = True,
 ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -343,13 +377,14 @@ def plot_cost_breakdown(
         fontweight="bold",
         y=1.00,
     )
-    plt.tight_layout()
+    fig.tight_layout()
 
     if save_path is not None:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[visualize] Saved cost breakdown to {save_path}")
     if show:
         plt.show()
+    plt.close(fig)
 
     return fig, axes
 
@@ -396,61 +431,18 @@ def plot_schedule_comparison(
     """
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
 
-    d = instance.due_date(h)
     n = len(initial_schedule)
 
     for ax, schedule, title_suffix in [
         (ax1, initial_schedule, "Initial"),
         (ax2, optimized_schedule, "Optimized"),
     ]:
-        time = 0
-        for rank, job_idx in enumerate(schedule):
-            job = instance.jobs[job_idx]
-            start = time
-            end = time + job.p
+        # Draw Gantt chart using shared helper
+        _draw_gantt_on_ax(ax, instance, schedule, h)
 
-            # Color based on earliness/tardiness
-            if end <= d:
-                color = "#2ecc71"
-            elif end == d:
-                color = "#f1c40f"
-            else:
-                color = "#e74c3c"
-
-            rect = Rectangle(
-                (start, rank - 0.4),
-                job.p,
-                0.8,
-                facecolor=color,
-                edgecolor="black",
-                linewidth=1.5,
-            )
-            ax.add_patch(rect)
-
-            # Label
-            mid_x = start + job.p / 2
-            ax.text(
-                mid_x,
-                rank,
-                f"J{job_idx}",
-                ha="center",
-                va="center",
-                fontsize=8,
-                fontweight="bold",
-                color="white",
-            )
-
-            time = end
-
-        # Due date line
-        ax.axvline(d, color="navy", linewidth=2.5, linestyle="--", alpha=0.7)
-
-        # Formatting
-        ax.set_ylim(-0.5, n - 0.5)
-        ax.set_xlim(-0.5, instance.sum_p + 0.5)
+        # Override some formatting for comparison view
         ax.set_yticks(list(range(min(n, 20))))  # Limit labels for readability
         ax.set_ylabel("Job Order", fontsize=10, fontweight="bold")
-        ax.grid(axis="x", alpha=0.3, linestyle=":", linewidth=0.8)
 
         cost = instance.evaluate(schedule, h)
         ax.set_title(f"{title_suffix} Schedule (Cost = {cost})", fontsize=11, fontweight="bold")
@@ -477,12 +469,13 @@ def plot_schedule_comparison(
     late_patch = mpatches.Patch(color="#e74c3c", label="Late")
     ax1.legend(handles=[early_patch, late_patch], loc="upper right", fontsize=9)
 
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path is not None:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[visualize] Saved schedule comparison to {save_path}")
     if show:
         plt.show()
+    plt.close(fig)
 
     return fig, [ax1, ax2]
 
@@ -594,13 +587,14 @@ def plot_training_curves(
             bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
 
     fig.suptitle("PPO Training Progress", fontsize=13, fontweight="bold")
-    plt.tight_layout()
+    fig.tight_layout()
 
     if save_path is not None:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[visualize] Saved training curves to {save_path}")
     if show:
         plt.show()
+    plt.close(fig)
 
     return fig, axes
 
@@ -654,50 +648,270 @@ def plot_instance_summary_grid(
 
     for idx, (instance, schedule) in enumerate(instances_with_schedules):
         ax = axes[idx]
-        d = instance.due_date(h)
         cost = instance.evaluate(schedule, h)
-        time = 0
 
-        for rank, job_idx in enumerate(schedule):
-            job = instance.jobs[job_idx]
-            start = time
-            end = time + job.p
-            color = "#2ecc71" if end <= d else ("#f1c40f" if end == d else "#e74c3c")
+        # Draw Gantt chart using shared helper
+        _draw_gantt_on_ax(ax, instance, schedule, h)
 
-            rect = Rectangle(
-                (start, rank - 0.4),
-                job.p,
-                0.8,
-                facecolor=color,
-                edgecolor="black",
-                linewidth=0.8,
-            )
-            ax.add_patch(rect)
-            time = end
-
-        ax.axvline(d, color="navy", linewidth=1.5, linestyle="--", alpha=0.6)
-        ax.set_ylim(-0.5, len(schedule) - 0.5)
-        ax.set_xlim(-0.5, instance.sum_p + 0.5)
+        # Compact formatting for grid view
         ax.set_title(f"Instance {instance.index} (Cost={cost})", fontsize=9, fontweight="bold")
         ax.set_ylabel("Job Order", fontsize=8)
         ax.set_xlabel("Time", fontsize=8)
         ax.tick_params(labelsize=7)
-        ax.grid(axis="x", alpha=0.2)
+        ax.legend().remove()  # Remove legend to save space
 
     # Hide unused subplots
     for idx in range(n_instances, len(axes)):
         axes[idx].set_visible(False)
 
     fig.suptitle(f"Instance Summary Grid (h={h})", fontsize=12, fontweight="bold")
-    plt.tight_layout()
+    fig.tight_layout()
 
     if save_path is not None:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[visualize] Saved instance grid to {save_path}")
     if show:
         plt.show()
+    plt.close(fig)
 
     return fig, axes[:n_instances]
+
+
+# ---------------------------------------------------------------------------
+# Agent Action Animation
+# ---------------------------------------------------------------------------
+
+
+def animate_agent_actions(
+    agent,
+    instance: SchInstance,
+    h: float = 0.4,
+    *,
+    interval: int = 500,
+    figsize: tuple[float, float] = (14, 8),
+    save_path: str | Path | None = None,
+    show: bool = True,
+) -> FuncAnimation:
+    """
+    Animate the sequence of swaps taken by an agent during optimization.
+
+    Replays the schedule evolution by applying each swap in ``agent.actions``
+    step-by-step and redrawing the Gantt chart at each frame.
+
+    Parameters
+    ----------
+    agent : Agent
+        An agent with ``.initial_schedule`` and ``.actions`` attributes
+        (recorded by Agent.solve()).
+    instance : SchInstance
+        The scheduling problem instance.
+    h : float
+        Due-date tightness factor.
+    interval : int
+        Milliseconds between frames (default 500).
+    figsize : tuple
+        Figure size (width, height).
+    save_path : str | Path | None
+        If provided, save the animation to this path (e.g., "animation.gif").
+    show : bool
+        If True, display the animation.
+
+    Returns
+    -------
+    anim : matplotlib.animation.FuncAnimation
+        The animation object (can be saved or displayed).
+    """
+    if not hasattr(agent, "actions") or not hasattr(agent, "initial_schedule"):
+        raise ValueError("Agent must have .actions and .initial_schedule attributes")
+
+    if not agent.actions:
+        raise ValueError("Agent has no recorded actions — call agent.solve() first")
+
+    # Reconstruct schedule states by applying swaps incrementally
+    schedules = [agent.initial_schedule[:]]  # Frame 0: initial schedule
+
+    current = agent.initial_schedule[:]
+    for i, j in agent.actions:
+        current = current[:]  # Make a copy before mutating
+        current[i], current[j] = current[j], current[i]
+        schedules.append(current)
+
+    # Precompute costs
+    costs = [instance.evaluate(sched, h) for sched in schedules]
+    initial_cost = costs[0]
+
+    # Create figure and axes
+    fig, ax = plt.subplots(figsize=figsize)
+    plt.subplots_adjust(bottom=0.15)
+
+    # Draw first frame (initialization)
+    def init_func():
+        ax.clear()
+        return []
+
+    # Update function for each frame
+    def update(frame_idx):
+        ax.clear()
+        schedule = schedules[frame_idx]
+        cost = costs[frame_idx]
+
+        # Draw Gantt chart
+        _draw_gantt_on_ax(ax, instance, schedule, h)
+
+        # Update title with step info
+        n_steps = len(agent.actions)
+        delta = cost - initial_cost
+        ax.set_title(
+            f"Step {frame_idx}/{n_steps}  |  Cost: {cost}  (Δ {delta:+d})",
+            fontsize=14,
+            fontweight="bold",
+        )
+
+        return []
+
+    # Create animation
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=len(schedules),
+        init_func=init_func,
+        interval=interval,
+        blit=False,
+        repeat=True,
+    )
+
+    # Save if requested
+    if save_path is not None:
+        save_path = Path(save_path)
+        try:
+            anim.save(str(save_path), dpi=100)
+            print(f"[visualize] Saved animation to {save_path}")
+        except Exception as e:
+            print(f"[visualize] Failed to save animation: {e}")
+
+    if show:
+        plt.show()
+    plt.close(fig)
+
+    return anim
+
+
+# ---------------------------------------------------------------------------
+# Benchmark comparison plots
+# ---------------------------------------------------------------------------
+
+
+def plot_convergence_curves(
+    agent_histories: dict[str, list[int]],
+    title: str = "Cost convergence",
+    figsize: tuple[float, float] = (12, 5),
+    show: bool = True,
+    save_path: str | None = None,
+):
+    """
+    Plot cost-vs-step convergence curves for multiple agents.
+
+    Parameters
+    ----------
+    agent_histories : dict[str, list[int]]
+        Mapping of agent name → cost_history list recorded during solve().
+    title : str
+    figsize : tuple
+    show : bool
+    save_path : str | None
+
+    Returns
+    -------
+    plt.Figure
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    cmap = plt.get_cmap("tab10")
+
+    for idx, (name, history) in enumerate(agent_histories.items()):
+        if not history:
+            continue
+        # Normalise x to [0, 1] so curves with different lengths are comparable
+        n = len(history)
+        xs = [i for i in range(n)]
+        ax.plot(xs, history, label=name, color=cmap(idx % 10), linewidth=1.8)
+
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Cost")
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show()
+    plt.close(fig)
+    return fig
+
+
+def plot_agent_comparison(
+    results: dict,
+    figsize: tuple[float, float] = (12, 6),
+    show: bool = True,
+    save_path: str | None = None,
+):
+    """
+    Side-by-side comparison of agents: bar chart of mean improvement% and
+    box plot of best-cost distribution.
+
+    Parameters
+    ----------
+    results : dict[str, AgentBenchmarkResult]
+        Output of BenchmarkRunner.run().
+    figsize : tuple
+    show : bool
+    save_path : str | None
+
+    Returns
+    -------
+    plt.Figure
+    """
+    names = list(results.keys())
+    means = [results[n].mean_improvement_pct for n in names]
+    stds = [results[n].std_improvement_pct for n in names]
+    best_costs = [[r.best_cost for r in results[n].results] for n in names]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    cmap = plt.get_cmap("tab10")
+    colors = [cmap(i % 10) for i in range(len(names))]
+
+    # --- Left: mean improvement % bar chart ---
+    bars = ax1.barh(names, means, xerr=stds, color=colors, capsize=4, alpha=0.85)
+    ax1.set_xlabel("Mean improvement % (higher is better)")
+    ax1.set_title("Schedule improvement by agent")
+    ax1.grid(True, axis="x", alpha=0.3)
+    for bar, val in zip(bars, means):
+        ax1.text(
+            bar.get_width() + 0.3,
+            bar.get_y() + bar.get_height() / 2,
+            f"{val:.1f}%",
+            va="center",
+            fontsize=9,
+        )
+
+    # --- Right: best-cost box plot ---
+    bp = ax2.boxplot(best_costs, labels=names, patch_artist=True, vert=True)
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+    ax2.set_ylabel("Best cost (lower is better)")
+    ax2.set_title("Best cost distribution")
+    ax2.grid(True, axis="y", alpha=0.3)
+
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show()
+    plt.close(fig)
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -708,9 +922,15 @@ if __name__ == "__main__":
     import sys
     sys.path.insert(0, ".")
 
-    from orlib_sch import load
-    from sch_env import SchEnv, run_episode
-    from sch_rl import PPOConfig, benchmark
+    try:
+        from .orlib_sch import load
+        from .sch_env import SchEnv
+        from .agent import GreedyAgent
+    except ImportError:
+        # Fallback for direct execution
+        from orlib_sch import load
+        from sch_env import SchEnv
+        from agent import GreedyAgent
 
     print("=" * 60)
     print("Visualization Demo")
@@ -718,53 +938,37 @@ if __name__ == "__main__":
 
     # Load a small dataset
     try:
-        ds = load("data/sch50.txt")
+        ds = load("data/sch10.txt")
     except FileNotFoundError:
         print("Note: data/sch10.txt not found. Skipping demo.")
         sys.exit(0)
 
-    # Run a quick benchmark to train PPO and get stats
-    cfg = PPOConfig(
-        hidden_size=64,
-        n_layers=3,
-        n_updates=500,  # Reduced for quick demo
-        rollout_steps=128,
-        eval_interval=20,
-        eval_instances=3,
-        seed=42,
-        lr=0.01
-    )
-
-    print("\nTraining PPO agent...")
-    stats = benchmark(ds.instances, cfg=cfg, h=0.4, verbose=True)
-
-    # Get the trained agent
-    agent = stats["best_agent"]
-
-    # Run optimization on first instance
+    # Run optimization with GreedyAgent on first instance
     inst = ds[0]
     env = SchEnv(inst, h=0.4, max_steps=100, seed=42)
-    initial_schedule = list(range(inst.n))
-    assert isinstance(agent, PPOAgent)
 
-    result = run_episode(env, agent.policy_fn, seed=42)
+    agent = GreedyAgent()
+    result = agent.solve(env, seed=42)
 
     print(f"\nInstance {inst.index}:")
     print(f"  n={inst.n}, sum_p={inst.sum_p}")
-    print(f"  Initial cost: {env.instance.evaluate(initial_schedule, 0.4)}")
+    print(f"  Initial cost: {agent.initial_schedule[0]}")  # Compute from initial_schedule
     print(f"  Final cost:   {result.best_cost}")
     print(f"  Improvement:  {result.improvement_pct:.1f}%")
 
     # Create visualizations
     print("\nGenerating visualizations...")
 
-    plot_gantt_chart(inst, result.best_schedule, h=0.4, show=True)
-    print("  ✓ Gantt chart")
+    # plot_gantt_chart(inst, result.best_schedule, h=0.4, show=True)
+    # print("  ✓ Gantt chart")
 
-    plot_cost_breakdown(inst, result.best_schedule, h=0.4, show=True)
-    print("  ✓ Cost breakdown")
+    # plot_cost_breakdown(inst, result.best_schedule, h=0.4, show=True)
+    # print("  ✓ Cost breakdown")
 
-    plot_schedule_comparison(inst, initial_schedule, result.best_schedule, h=0.4, show=True)
-    print("  ✓ Schedule comparison")
+    # plot_schedule_comparison(inst, agent.initial_schedule, result.best_schedule, h=0.4, show=True)
+    # print("  ✓ Schedule comparison")
+
+    animate_agent_actions(env, inst)
+    print("  ✓ Agent actions animation")
 
     print("\nDemo complete!")

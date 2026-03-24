@@ -67,7 +67,7 @@ from typing import Any
 
 import numpy as np
 
-from orlib_sch import SchInstance
+from .orlib_sch import SchInstance
 
 # ---------------------------------------------------------------------------
 # Action encoding helpers

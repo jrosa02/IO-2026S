@@ -73,7 +73,6 @@ from typing import NamedTuple
 # Data containers
 # ---------------------------------------------------------------------------
 
-
 class SchJob(NamedTuple):
     """A single job in a common due date scheduling instance."""
 
@@ -122,14 +121,9 @@ class SchInstance:
 
         d = floor(SUM_P * h),   h typically in {0.2, 0.4, 0.6, 0.8}
 
-        Parameters
-        ----------
+        Parameters:
         h : float
             Due-date tightness.  h=0 → all jobs tardy; h=1 → all jobs early.
-
-        Returns
-        -------
-        int
         """
         if not 0.0 <= h <= 1.0:
             raise ValueError(f"h must be in [0, 1], got {h!r}.")
