@@ -75,6 +75,7 @@ def test_agent_benchmark_result_aggregation():
             best_cost=70, total_reward=1.0, n_steps=10,
             n_improvements=3, improvement_pct=float(10 * i),
             best_schedule=list(range(5)),
+            cost_history=[100, 90, 80, 70],
         )
         for i in range(1, 4)  # improvement_pct: 10, 20, 30
     ]

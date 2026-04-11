@@ -96,6 +96,12 @@ class Agent(ABC):
     # Episode orchestration
     # ------------------------------------------------------------------
 
+    def _solve_init(self, env: SchEnv) -> None:
+        """Initialise per-episode agent state. Call at the top of every solve()."""
+        self.actions: list[tuple[int, int]] = []
+        self.cost_history: list[int] = []
+        self.initial_schedule: list[int] = env.current_schedule[:]
+
     def _make_recording_policy(
         self, env: SchEnv, policy_fn: Callable
     ) -> Callable[[np.ndarray], int]:
@@ -133,11 +139,9 @@ class Agent(ABC):
         -------
         EpisodeResult
         """
-        self.actions: list[tuple[int, int]] = []
         start_schedule = self.construct(env.instance)
-        # Reset env to capture the initial schedule
         env.reset(seed=seed, schedule=start_schedule)
-        self.initial_schedule = env.current_schedule[:]
+        self._solve_init(env)
         recording_policy = self._make_recording_policy(env, self.act)
         # Re-run with recorded initial schedule to ensure determinism
         return run_episode(env, recording_policy, seed=None, start_schedule=self.initial_schedule)
@@ -196,15 +200,10 @@ class RandomAgent(Agent):
 
     def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
         """Run an episode with a random policy using the env's own RNG."""
-        self.actions = []
         env.reset(seed=seed)
-        self.initial_schedule = env.current_schedule[:]
+        self._solve_init(env)
         recording_policy = self._make_recording_policy(env, env.action_space_sample)
         return run_episode(env, recording_policy, seed=None, start_schedule=self.initial_schedule)
-
-    def act(self, obs: np.ndarray) -> int:
-        """Not used directly; ``solve()`` delegates to env's sampler."""
-        raise NotImplementedError("RandomAgent uses env.action_space_sample — call solve(env) instead")
 
 
 class GreedyAgent(Agent):
@@ -220,10 +219,9 @@ class GreedyAgent(Agent):
 
     def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
         """Run a greedy episode with exhaustive 1-step look-ahead."""
-        self.actions = []
         start_schedule = self.construct(env.instance)
         env.reset(seed=seed, schedule=start_schedule)
-        self.initial_schedule = env.current_schedule[:]
+        self._solve_init(env)
 
         def greedy_policy(obs: np.ndarray) -> int:
             best_action = 0
@@ -241,7 +239,3 @@ class GreedyAgent(Agent):
 
         recording_policy = self._make_recording_policy(env, greedy_policy)
         return run_episode(env, recording_policy, seed=None, start_schedule=self.initial_schedule)
-
-    def act(self, obs: np.ndarray) -> int:
-        """Not directly usable without env access; call ``solve(env)`` instead."""
-        raise NotImplementedError("GreedyAgent requires env access — call solve(env) instead")

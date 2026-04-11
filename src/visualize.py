@@ -60,6 +60,8 @@ from matplotlib.patches import Rectangle
 from matplotlib.animation import FuncAnimation
 import numpy as np
 
+from src.benchmark import AgentBenchmarkResult
+
 try:
     from .orlib_sch import SchInstance
 except ImportError:
@@ -247,132 +249,183 @@ def plot_gantt_chart(
 
 
 def plot_cost_breakdown(
+    results: "dict[str, AgentBenchmarkResult]",
     instance: SchInstance,
-    schedule: Sequence[int],
     h: float = 0.4,
     *,
+    instance_index: int = 0,
     figsize: tuple[float, float] = (14, 10),
     save_path: str | Path | None = None,
     show: bool = True,
 ) -> tuple[plt.Figure, list[plt.Axes]]:
     """
-    Create a cost breakdown visualization with multiple subplots.
+    Multi-agent cost breakdown for a single instance.
 
-    Subplots:
-        1. Stacked bar chart of per-job costs (earliness vs tardiness)
-        2. Cumulative cost over the schedule timeline
-        3. Cost distribution across jobs
+    Aggregates per-job costs across all agents' best schedules for
+    *instance_index*, then plots four subplots:
+
+    1. Per-job mean cost bar chart (±std across agents, sorted descending).
+    2. Deletion candidate pie chart — top-*k* costliest jobs exploded out,
+       remainder grouped as "Others".
+    3. Cumulative cost band — mean ± std across agents over schedule position.
+    4. Deletion candidate table — ranked by mean cost with early/late split
+       and how often each job appears in top-k across agents.
 
     Parameters
     ----------
+    results : dict[str, AgentBenchmarkResult]
+        Output of BenchmarkRunner.run().
     instance : SchInstance
-        The scheduling problem instance.
-    schedule : sequence of int
-        Job permutation (order of execution).
+        The instance to analyse (should match *instance_index*).
     h : float
         Due-date tightness factor.
+    instance_index : int
+        Index into each agent's result list.
+    top_k : int
+        Number of jobs flagged as deletion candidates (default 5).
     figsize : tuple
-        Figure size (width, height).
     save_path : str | Path | None
-        If provided, save the figure to this path.
     show : bool
-        If True, display the figure.
 
     Returns
     -------
     fig : matplotlib.figure.Figure
     axes : list of matplotlib.axes.Axes
     """
+    # ------------------------------------------------------------------
+    # Aggregate per-job costs across agents
+    # ------------------------------------------------------------------
+    # job_data[job_id] = {"early": [...], "late": [...]}
+    # aggregated only over instance_index for bar/heatmap/scatter
+    job_data: dict[int, dict[str, list[float]]] = {
+        j: {"early": [], "late": []} for j in range(instance.n)
+    }
+
+    # per_job_traces[agent_name] = list of per-instance per-job-cost arrays
+    # each inner list has length = n jobs (cost at schedule position k)
+    per_job_traces: dict[str, list[list[float]]] = {name: [] for name in results}
+
+    for name, agent_result in results.items():
+        # heatmap / bar / scatter: use instance_index only
+        sched_ref = agent_result.results[instance_index].best_schedule
+        for entry in _compute_job_timeline(instance, sched_ref, h):
+            job_data[entry["job_idx"]]["early"].append(entry["early_cost"])
+            job_data[entry["job_idx"]]["late"].append(entry["late_cost"])
+
+        # per-job traces: one line per instance
+        for ep in agent_result.results:
+            timeline = _compute_job_timeline(instance, ep.best_schedule, h)
+            per_job_traces[name].append(
+                [entry["early_cost"] + entry["late_cost"] for entry in timeline]
+            )
+
+    n_agents = len(results)
+    job_ids = list(range(instance.n))
+    mean_early = np.array([np.mean(job_data[j]["early"]) for j in job_ids])
+    std_early  = np.array([np.std(job_data[j]["early"])  for j in job_ids])
+    mean_late  = np.array([np.mean(job_data[j]["late"])  for j in job_ids])
+    std_late   = np.array([np.std(job_data[j]["late"])   for j in job_ids])
+    mean_total = mean_early + mean_late
+    std_total  = np.sqrt(std_early**2 + std_late**2)
+
+    # Sort jobs by mean total cost descending
+    order = np.argsort(mean_total)[::-1]
+    sorted_ids    = [job_ids[i] for i in order]
+    sorted_mean_e = mean_early[order]
+    sorted_std_e  = std_early[order]
+    sorted_mean_l = mean_late[order]
+    sorted_std_l  = std_late[order]
+    sorted_mean_t = mean_total[order]
+    sorted_std_t  = std_total[order]
+
+    # ------------------------------------------------------------------
+    # Figure
+    # ------------------------------------------------------------------
     fig, axes = plt.subplots(2, 2, figsize=figsize)
     axes = axes.flatten()
-    d = instance.due_date(h)
-    total_cost = instance.evaluate(schedule, h)
+    cmap = plt.get_cmap("tab10")
 
-    # Collect per-job cost data
-    time = 0
-    job_costs_early = []
-    job_costs_late = []
-    job_indices = []
-    completions = []
-    cumulative_costs = []
-    cumulative = 0
-
-    for job_idx in schedule:
-        job = instance.jobs[job_idx]
-        time += job.p
-        early = max(0, d - time)
-        late = max(0, time - d)
-        cost_early = job.a * early
-        cost_late = job.b * late
-        job_cost = cost_early + cost_late
-
-        job_indices.append(job_idx)
-        job_costs_early.append(cost_early)
-        job_costs_late.append(cost_late)
-        completions.append(time)
-        cumulative += job_cost
-        cumulative_costs.append(cumulative)
-
-    # --- Subplot 1: Stacked bar chart of per-job costs ---
+    # --- Subplot 1: per-job mean cost bar (sorted) ---
     ax = axes[0]
-    x = np.arange(len(schedule))
-    width = 0.7
-    bars_early = ax.bar(x, job_costs_early, width, label="Earliness cost", color="#3498db")
-    bars_late = ax.bar(x, job_costs_late, width, bottom=job_costs_early, label="Tardiness cost", color="#e67e22")
-
-    ax.set_xlabel("Job Order Position", fontsize=10, fontweight="bold")
-    ax.set_ylabel("Penalty Cost", fontsize=10, fontweight="bold")
-    ax.set_title("Per-Job Cost Breakdown", fontsize=11, fontweight="bold")
-    ax.legend(loc="upper right", fontsize=9)
+    x = np.arange(instance.n)
+    ax.bar(x, sorted_mean_e, 0.7, label="Earliness", color="#3498db",
+           yerr=sorted_std_e, capsize=2, error_kw={"linewidth": 0.8})
+    ax.bar(x, sorted_mean_l, 0.7, bottom=sorted_mean_e, label="Tardiness",
+           color="#e67e22", yerr=sorted_std_l, capsize=2,
+           error_kw={"linewidth": 0.8})
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"J{j}" for j in sorted_ids], fontsize=7, rotation=45)
+    ax.set_xlabel("Job (sorted by mean cost)", fontsize=10, fontweight="bold")
+    ax.set_ylabel("Mean penalty cost", fontsize=10, fontweight="bold")
+    ax.set_title("Per-Job Cost Across Agents (±std)", fontsize=11, fontweight="bold")
+    ax.legend(fontsize=9)
     ax.grid(axis="y", alpha=0.3)
 
-    # --- Subplot 2: Cumulative cost over time ---
+    # --- Subplot 2: per-job cost heatmap (jobs × agents) ---
     ax = axes[1]
-    ax.plot(completions, cumulative_costs, marker="o", linewidth=2, markersize=6, color="#e74c3c")
-    ax.axhline(total_cost, color="black", linestyle="--", linewidth=1, label=f"Final cost = {total_cost}")
-    ax.fill_between(completions, cumulative_costs, alpha=0.3, color="#e74c3c")
-    ax.set_xlabel("Completion Time", fontsize=10, fontweight="bold")
-    ax.set_ylabel("Cumulative Cost", fontsize=10, fontweight="bold")
-    ax.set_title("Cumulative Cost Over Time", fontsize=11, fontweight="bold")
-    ax.legend(loc="upper left", fontsize=9)
+    agent_names = list(results.keys())
+    # matrix: rows = jobs sorted by mean cost, cols = agents
+    heatmap = np.zeros((instance.n, n_agents), dtype=float)
+    for a_idx, agent_result in enumerate(results.values()):
+        schedule = agent_result.results[instance_index].best_schedule
+        timeline = _compute_job_timeline(instance, schedule, h)
+        for entry in timeline:
+            heatmap[order.tolist().index(entry["job_idx"]), a_idx] = (
+                entry["early_cost"] + entry["late_cost"]
+            )
+    im = ax.imshow(heatmap, aspect="auto", cmap="YlOrRd")
+    ax.set_xticks(range(n_agents))
+    ax.set_xticklabels(agent_names, fontsize=8, rotation=30, ha="right")
+    ax.set_yticks(range(instance.n))
+    ax.set_yticklabels([f"J{j}" for j in sorted_ids], fontsize=7)
+    ax.set_xlabel("Agent", fontsize=10, fontweight="bold")
+    ax.set_ylabel("Job (sorted by mean cost ↓)", fontsize=10, fontweight="bold")
+    ax.set_title("Per-Job Cost Heatmap", fontsize=11, fontweight="bold")
+    fig.colorbar(im, ax=ax, shrink=0.8, label="Cost")
+
+    # --- Subplot 3: per-job cost — one translucent line per instance, coloured by agent ---
+    ax = axes[2]
+    xs = np.arange(1, instance.n + 1)
+    for a_idx, (name, traces) in enumerate(per_job_traces.items()):
+        color = cmap(a_idx % 10)
+        for inst_trace in traces:
+            ax.plot(xs, inst_trace, color=color, linewidth=1.0, alpha=0.35)
+        # bold mean line on top
+        if traces:
+            mean_trace = np.mean(traces, axis=0)
+            ax.plot(xs, mean_trace, color=color, linewidth=2.2,
+                    label=name, zorder=3)
+    ax.set_xlabel("Schedule position", fontsize=10, fontweight="bold")
+    ax.set_ylabel("Per-job cost", fontsize=10, fontweight="bold")
+    ax.set_title("Per-Job Cost per Instance (mean bold)", fontsize=11, fontweight="bold")
+    ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
 
-    # --- Subplot 3: Cost distribution (pie chart) ---
-    ax = axes[2]
-    total_early = sum(job_costs_early)
-    total_late = sum(job_costs_late)
-    sizes = [total_early, total_late]
-    labels = [f"Earliness\n{total_early}", f"Tardiness\n{total_late}"]
-    colors = ["#3498db", "#e67e22"]
-    wedges, texts, autotexts = ax.pie(
-        sizes,
-        labels=labels,
-        colors=colors,
-        autopct="%1.1f%%",
-        startangle=90,
-        textprops={"fontsize": 9, "fontweight": "bold"},
-    )
-    ax.set_title("Cost Composition", fontsize=11, fontweight="bold")
-
-    # --- Subplot 4: Top 10 highest-cost jobs ---
+    # --- Subplot 4: earliness vs tardiness scatter (one point per job) ---
     ax = axes[3]
-    job_total_costs = [job_costs_early[i] + job_costs_late[i] for i in range(len(schedule))]
-    top_k = min(10, len(schedule))
-    top_indices = np.argsort(job_total_costs)[-top_k:][::-1]
-    top_jobs = [schedule[i] for i in top_indices]
-    top_costs = [job_total_costs[i] for i in top_indices]
-    top_y_labels = [f"J{j}" for j in top_jobs]
+    ax.scatter(mean_early, mean_late, s=60, color="#8e44ad", alpha=0.8, zorder=3)
+    for j, (xe, xl) in enumerate(zip(mean_early, mean_late)):
+        ax.annotate(
+            f"J{j}", (xe, xl),
+            textcoords="offset points", xytext=(4, 4),
+            fontsize=7, color="#2c3e50",
+        )
+    # Quadrant guidelines at medians
+    ax.axvline(float(np.median(mean_early)), color="#3498db", linewidth=0.8,
+               linestyle="--", alpha=0.6, label="median earliness")
+    ax.axhline(float(np.median(mean_late)),  color="#e67e22", linewidth=0.8,
+               linestyle="--", alpha=0.6, label="median tardiness")
+    ax.set_xlabel("Mean earliness cost", fontsize=10, fontweight="bold")
+    ax.set_ylabel("Mean tardiness cost", fontsize=10, fontweight="bold")
+    ax.set_title("Job Penalty Profile (Earliness vs Tardiness)", fontsize=11, fontweight="bold")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
 
-    ax.barh(range(len(top_jobs)), top_costs, color="#9b59b6")
-    ax.set_yticks(range(len(top_jobs)))
-    ax.set_yticklabels(top_y_labels)
-    ax.set_xlabel("Total Cost", fontsize=10, fontweight="bold")
-    ax.set_title(f"Top {top_k} Highest-Cost Jobs", fontsize=11, fontweight="bold")
-    ax.grid(axis="x", alpha=0.3)
-
+    all_finals = [traces[-1][-1] for traces in per_job_traces.values() if traces]
+    mean_total_cost = float(np.mean(all_finals)) if all_finals else 0
     fig.suptitle(
-        f"Cost Analysis: Instance {instance.index}, n={instance.n}, h={h}\n"
-        f"Total Cost = {total_cost}",
+        f"Cost Breakdown: Instance {instance.index}, n={instance.n}, h={h}  |  "
+        f"{n_agents} agent(s)  |  Mean total cost = {mean_total_cost:.0f}",
         fontsize=12,
         fontweight="bold",
         y=1.00,
@@ -395,28 +448,32 @@ def plot_cost_breakdown(
 
 
 def plot_schedule_comparison(
+    results: "dict[str, AgentBenchmarkResult]",
     instance: SchInstance,
-    initial_schedule: Sequence[int],
-    optimized_schedule: Sequence[int],
     h: float = 0.4,
     *,
+    instance_index: int = 0,
     figsize: tuple[float, float] = (16, 7),
     save_path: str | Path | None = None,
     show: bool = True,
 ) -> tuple[plt.Figure, list[plt.Axes]]:
     """
-    Compare two schedules side-by-side using Gantt charts.
+    Compare the initial schedule against the best agent's optimized schedule.
+
+    Picks the agent with the lowest ``best_cost`` on *instance_index*, then
+    draws two Gantt charts: initial (identity order) on top, best schedule
+    below.  Each subplot title shows the agent name and cost score.
 
     Parameters
     ----------
+    results : dict[str, AgentBenchmarkResult]
+        Output of BenchmarkRunner.run().
     instance : SchInstance
-        The scheduling problem instance.
-    initial_schedule : sequence of int
-        The starting schedule (typically random or identity).
-    optimized_schedule : sequence of int
-        The final optimized schedule.
+        The scheduling problem instance to visualize.
     h : float
         Due-date tightness factor.
+    instance_index : int
+        Which per-instance result to use when selecting the best agent.
     figsize : tuple
         Figure size (width, height).
     save_path : str | Path | None
@@ -429,42 +486,43 @@ def plot_schedule_comparison(
     fig : matplotlib.figure.Figure
     axes : list of matplotlib.axes.Axes
     """
+    best_agent_name = min(
+        results,
+        key=lambda name: results[name].results[instance_index].best_cost,
+    )
+    best_result = results[best_agent_name].results[instance_index]
+    optimized_schedule = best_result.best_schedule
+    initial_schedule = list(range(instance.n))
+
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
 
     n = len(initial_schedule)
+    initial_cost = instance.evaluate(initial_schedule, h)
+    final_cost = best_result.best_cost
 
-    for ax, schedule, title_suffix in [
-        (ax1, initial_schedule, "Initial"),
-        (ax2, optimized_schedule, "Optimized"),
+    for ax, schedule, label in [
+        (ax1, initial_schedule, f"Initial  |  Cost = {initial_cost}"),
+        (ax2, optimized_schedule, f"{best_agent_name}  |  Cost = {final_cost}"),
     ]:
-        # Draw Gantt chart using shared helper
         _draw_gantt_on_ax(ax, instance, schedule, h)
-
-        # Override some formatting for comparison view
-        ax.set_yticks(list(range(min(n, 20))))  # Limit labels for readability
+        ax.set_yticks(list(range(min(n, 20))))
         ax.set_ylabel("Job Order", fontsize=10, fontweight="bold")
-
-        cost = instance.evaluate(schedule, h)
-        ax.set_title(f"{title_suffix} Schedule (Cost = {cost})", fontsize=11, fontweight="bold")
+        ax.set_title(label, fontsize=11, fontweight="bold")
 
     ax2.set_xlabel("Completion Time", fontsize=10, fontweight="bold")
 
-    # Overall title with improvement
-    initial_cost = instance.evaluate(initial_schedule, h)
-    final_cost = instance.evaluate(optimized_schedule, h)
     improvement = initial_cost - final_cost
     improvement_pct = 100.0 * improvement / max(initial_cost, 1)
 
     fig.suptitle(
         f"Schedule Comparison: Instance {instance.index}, n={instance.n}, h={h}\n"
-        f"Initial Cost = {initial_cost}  →  Final Cost = {final_cost}  "
-        f"(Improvement: {improvement:+d}, {improvement_pct:+.1f}%)",
+        f"Best agent: {best_agent_name}  |  "
+        f"Improvement: {improvement:+d} ({improvement_pct:+.1f}%)",
         fontsize=12,
         fontweight="bold",
         y=0.995,
     )
 
-    # Legend
     early_patch = mpatches.Patch(color="#2ecc71", label="Early")
     late_patch = mpatches.Patch(color="#e74c3c", label="Late")
     ax1.legend(handles=[early_patch, late_patch], loc="upper right", fontsize=9)
@@ -600,84 +658,6 @@ def plot_training_curves(
 
 
 # ---------------------------------------------------------------------------
-# Multi-instance Summary Grid
-# ---------------------------------------------------------------------------
-
-
-def plot_instance_summary_grid(
-    instances_with_schedules: list[tuple[SchInstance, list[int]]],
-    h: float = 0.4,
-    *,
-    figsize: tuple[float, float] | None = None,
-    save_path: str | Path | None = None,
-    show: bool = True,
-) -> tuple[plt.Figure, list[plt.Axes]]:
-    """
-    Create a grid of small Gantt charts for multiple instances.
-
-    Parameters
-    ----------
-    instances_with_schedules : list of (SchInstance, schedule)
-        Pairs of instances and their optimized schedules.
-    h : float
-        Due-date tightness factor.
-    figsize : tuple | None
-        Figure size. If None, computed automatically based on number of instances.
-    save_path : str | Path | None
-        If provided, save the figure to this path.
-    show : bool
-        If True, display the figure.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-    axes : list of matplotlib.axes.Axes (flattened)
-    """
-    n_instances = len(instances_with_schedules)
-    grid_cols = 3
-    grid_rows = (n_instances + grid_cols - 1) // grid_cols
-
-    if figsize is None:
-        figsize = (grid_cols * 5, grid_rows * 4)
-
-    fig, axes = plt.subplots(grid_rows, grid_cols, figsize=figsize)
-    if grid_rows == 1 and grid_cols == 1:
-        axes = [axes]
-    else:
-        axes = axes.flatten()
-
-    for idx, (instance, schedule) in enumerate(instances_with_schedules):
-        ax = axes[idx]
-        cost = instance.evaluate(schedule, h)
-
-        # Draw Gantt chart using shared helper
-        _draw_gantt_on_ax(ax, instance, schedule, h)
-
-        # Compact formatting for grid view
-        ax.set_title(f"Instance {instance.index} (Cost={cost})", fontsize=9, fontweight="bold")
-        ax.set_ylabel("Job Order", fontsize=8)
-        ax.set_xlabel("Time", fontsize=8)
-        ax.tick_params(labelsize=7)
-        ax.legend().remove()  # Remove legend to save space
-
-    # Hide unused subplots
-    for idx in range(n_instances, len(axes)):
-        axes[idx].set_visible(False)
-
-    fig.suptitle(f"Instance Summary Grid (h={h})", fontsize=12, fontweight="bold")
-    fig.tight_layout()
-
-    if save_path is not None:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"[visualize] Saved instance grid to {save_path}")
-    if show:
-        plt.show()
-    plt.close(fig)
-
-    return fig, axes[:n_instances]
-
-
-# ---------------------------------------------------------------------------
 # Agent Action Animation
 # ---------------------------------------------------------------------------
 
@@ -802,19 +782,24 @@ def animate_agent_actions(
 
 
 def plot_convergence_curves(
-    agent_histories: dict[str, list[int]],
+    results: dict[str, AgentBenchmarkResult],
     title: str = "Cost convergence",
     figsize: tuple[float, float] = (12, 5),
     show: bool = True,
     save_path: str | None = None,
 ):
     """
-    Plot cost-vs-step convergence curves for multiple agents.
+    Plot mean convergence curve ± std band across all instances for each agent.
+
+    For each agent all per-instance ``cost_history`` traces are aligned to a
+    common step axis by padding shorter traces with their final value.  The
+    mean cost at each step is drawn as the main line; a shaded band shows
+    ±1 standard deviation across instances.
 
     Parameters
     ----------
-    agent_histories : dict[str, list[int]]
-        Mapping of agent name → cost_history list recorded during solve().
+    results : dict[str, AgentBenchmarkResult]
+        Mapping of agent name → AgentBenchmarkResult as returned by BenchmarkRunner.run().
     title : str
     figsize : tuple
     show : bool
@@ -827,13 +812,28 @@ def plot_convergence_curves(
     fig, ax = plt.subplots(figsize=figsize)
     cmap = plt.get_cmap("tab10")
 
-    for idx, (name, history) in enumerate(agent_histories.items()):
-        if not history:
+    for idx, (name, agent_result) in enumerate(results.items()):
+        histories = [r.cost_history for r in agent_result.results if r.cost_history]
+        if not histories:
             continue
-        # Normalise x to [0, 1] so curves with different lengths are comparable
-        n = len(history)
-        xs = [i for i in range(n)]
-        ax.plot(xs, history, label=name, color=cmap(idx % 10), linewidth=1.8)
+
+        max_len = max(len(h) for h in histories)
+        # Pad shorter traces with their last value so all have equal length
+        padded = np.array(
+            [h + [h[-1]] * (max_len - len(h)) for h in histories],
+            dtype=float,
+        )  # shape: (n_instances, max_len)
+
+        mean = padded.mean(axis=0)
+        std = padded.std(axis=0)
+        xs = np.arange(max_len)
+        color = cmap(idx % 10)
+
+        best = padded.min(axis=0)
+
+        ax.plot(xs, mean, label=f"{name} (mean)", color=color, linewidth=1.8)
+        ax.fill_between(xs, mean - std, mean + std, color=color, alpha=0.2, label=f"{name} (±1σ)")
+        ax.plot(xs, best, color=color, linewidth=1.0, linestyle="--", alpha=0.7, label=f"{name} (best)")
 
     ax.set_xlabel("Step")
     ax.set_ylabel("Cost")

@@ -61,9 +61,9 @@ from .sch_env import SchEnv, EpisodeResult
 @dataclass
 class SAConfig:
     T0: float = 100.0
-    b: float = 0.005
+    b: float = 0.0005
     c: float = 10
-    d: float = 5
+    d: float = 50
     T_min: float = 1e-5
     temp_plot_file: str = "temperature_schedule.png"
 
@@ -88,15 +88,12 @@ class SimulatedAnnealingAgent(Agent):
         if seed is not None:
             random.seed(seed)
 
-        obs, _ = env.reset()
+        env.reset()
+        self._solve_init(env)
 
-        self.actions = []
-        self.cost_history = []
-        self.initial_schedule = list(env._schedule)
-
-        current_cost = env._compute_cost(env._schedule)
-        best_cost = current_cost
-
+        initial_cost = env.current_cost
+        current_cost = initial_cost
+        total_reward = 0.0
         temperatures = []
 
         for step in range(env.max_steps):
@@ -104,50 +101,41 @@ class SimulatedAnnealingAgent(Agent):
                  self.cfg.c * (math.sin(step / self.cfg.d))**2)
             T = max(T, self.cfg.T_min)
             temperatures.append(T)
-            i, j = 0, 0
-            accept = False
-            while not accept:
-                action = random.randrange(len(env._pairs))
-                i, j = env._pairs[action]
 
-                temp_schedule = list(env._schedule)
+            while True:
+                action = env.action_space_sample()
+                i, j = env.decode_action(action)
+                temp_schedule = env.current_schedule
                 temp_schedule[i], temp_schedule[j] = temp_schedule[j], temp_schedule[i]
-                new_cost = env._compute_cost(temp_schedule)
-
+                new_cost = env.instance.evaluate(temp_schedule, env.h)
                 delta = new_cost - current_cost
+                if delta < 0 or random.random() < math.exp(-delta / T):
+                    break
 
-                if delta < 0:
-                    accept = True
-                else:
-                    prob = math.exp(-delta / T)
-                    if random.random() < prob:
-                        accept = True
+            _, reward, _, _, _ = env.step(action)
+            current_cost = env.current_cost
+            total_reward += reward
+            self.actions.append((i, j))
+            self.cost_history.append(env.best_cost)
 
-            if accept:
-                obs, reward, term, trunc, _ = env.step(action)
-                current_cost = env._compute_cost(env._schedule)
-                self.actions.append((i, j))
-                if current_cost < best_cost:
-                    best_cost = current_cost
-
-            self.cost_history.append(best_cost)
-
-        # Plot and save the temperature schedule
         self._plot_temperature_schedule(temperatures)
 
-        info = env._info()
+        best_cost = env.best_cost
+        n_improvements = sum(
+            1 for a, b in zip(self.cost_history, self.cost_history[1:]) if b < a
+        )
         return EpisodeResult(
             instance_index=env.instance.index,
             h=env.h,
-            initial_cost=env._initial_cost,
-            final_cost=self.cost_history[-1],
-            best_cost=min(self.cost_history),
-            total_reward=sum(env._compute_cost(env._schedule) - self.cost_history[i]
-                           for i in range(len(self.cost_history) - 1)),
+            initial_cost=initial_cost,
+            final_cost=env.current_cost,
+            best_cost=best_cost,
+            total_reward=total_reward,
             n_steps=len(self.actions),
-            n_improvements=0,
-            improvement_pct=(100.0 * (env._initial_cost - min(self.cost_history)) / env._initial_cost),
-            best_schedule=env._best_schedule[:],
+            n_improvements=n_improvements,
+            improvement_pct=(100.0 * (initial_cost - best_cost) / initial_cost),
+            best_schedule=env.best_schedule,
+            cost_history=self.cost_history[:],
         )
 
 # ---------------------------------------------------------------------------
@@ -172,11 +160,9 @@ class GeneticAlgorithmAgent(Agent):
         if seed is not None:
             random.seed(seed)
 
-        obs, _ = env.reset()
-        self.actions = []
-        self.cost_history = []
-        self.initial_schedule = list(env._schedule)
-        initial_cost = env._initial_cost
+        env.reset()
+        self._solve_init(env)
+        initial_cost = env.current_cost
         best_cost_so_far = initial_cost
         self.cost_history.append(initial_cost)
 
@@ -186,7 +172,7 @@ class GeneticAlgorithmAgent(Agent):
         # Helper functions
         # ------------------------------------------------------------------
         def cost(schedule):
-            return env._compute_cost(schedule)
+            return env.instance.evaluate(schedule, env.h)
 
         def random_perm():
             p = list(range(n))
@@ -243,59 +229,51 @@ class GeneticAlgorithmAgent(Agent):
         # ------------------------------------------------------------------
         # Main loop: take exactly env.max_steps actions
         # ------------------------------------------------------------------
-        current = list(env._schedule)
+        current = env.current_schedule
         target, target_cost = run_ga(current)   # initial target
 
         total_reward = 0.0
 
         for step in range(env.max_steps):
-            # If current schedule equals target (or we have no improvement left),
-            # find a new target (re-optimize) or perform a random step.
             if current == target or step % self.cfg.reoptimize_every == 0:
                 target, target_cost = run_ga(current)
 
-            # If we are already at the target, do a random swap to escape local optimum
             if current == target:
-                # random action (swap)
-                action = random.randrange(len(env._pairs))
-                i, j = env._pairs[action]
+                action = env.action_space_sample()
+                i, j = env.decode_action(action)
             else:
-                # Find first position where current differs from target
-                for i in range(n):
-                    if current[i] != target[i]:
-                        j = current.index(target[i])
-                        break
-                # ensure ordered pair
-                a, b = (i, j) if i < j else (j, i)
-                action = env._pairs.index((a, b))
+                i, j = next(
+                    (i, current.index(target[i])) for i in range(n) if current[i] != target[i]
+                )
+                action = env.encode_action(i, j)
 
-            # Execute the action
-            obs, reward, term, trunc, _ = env.step(action)
-            self.actions.append(env._pairs[action])
+            _, reward, _, _, _ = env.step(action)
+            self.actions.append(env.decode_action(action))
             total_reward += reward
 
-            # Update current schedule and cost history
-            current = list(env._schedule)
-            current_cost = env._compute_cost(current)
-            if current_cost < best_cost_so_far:
-                best_cost_so_far = current_cost
+            current = env.current_schedule
+            if env.current_cost < best_cost_so_far:
+                best_cost_so_far = env.current_cost
             self.cost_history.append(best_cost_so_far)
 
         # ------------------------------------------------------------------
         # Build EpisodeResult
         # ------------------------------------------------------------------
-        final_cost = env._compute_cost(env._schedule)
+        n_improvements = sum(
+            1 for a, b in zip(self.cost_history, self.cost_history[1:]) if b < a
+        )
         improvement_pct = (100.0 * (initial_cost - best_cost_so_far) / initial_cost) if initial_cost > 0 else 0.0
 
         return EpisodeResult(
             instance_index=env.instance.index,
             h=env.h,
             initial_cost=initial_cost,
-            final_cost=final_cost,
+            final_cost=env.current_cost,
             best_cost=best_cost_so_far,
             total_reward=total_reward,
             n_steps=len(self.actions),
-            n_improvements=0,        # could be computed but not critical
+            n_improvements=n_improvements,
             improvement_pct=improvement_pct,
-            best_schedule=env._best_schedule[:],
+            best_schedule=env.best_schedule,
+            cost_history=self.cost_history[:],
         )
