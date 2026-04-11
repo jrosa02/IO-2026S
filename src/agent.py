@@ -245,33 +245,3 @@ class GreedyAgent(Agent):
     def act(self, obs: np.ndarray) -> int:
         """Not directly usable without env access; call ``solve(env)`` instead."""
         raise NotImplementedError("GreedyAgent requires env access — call solve(env) instead")
-
-
-class ConstructiveRandomAgent(Agent):
-    """
-    Agent that constructs a schedule using a simple heuristic, then refines it
-    with random swaps.
-
-    The construction phase orders jobs by descending ``b/a`` ratio (prioritising
-    high-tardiness-penalty jobs early), then the iterative phase applies random
-    swaps to escape local optima.
-    """
-
-    def __init__(self, seed: int | None = None) -> None:
-        self._rng = random.Random(seed)
-
-    def construct(self, instance: SchInstance) -> list[int]:
-        """Order jobs by descending b/a ratio (tardy-priority heuristic)."""
-        jobs = instance.jobs
-        return sorted(range(instance.n), key=lambda i: -(jobs[i].b / max(jobs[i].a, 1)))
-
-    def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
-        self.actions = []
-        start_schedule = self.construct(env.instance)
-        env.reset(seed=seed, schedule=start_schedule)
-        self.initial_schedule = env.current_schedule[:]
-        recording_policy = self._make_recording_policy(env, env.action_space_sample)
-        return run_episode(env, recording_policy, seed=None, start_schedule=self.initial_schedule)
-
-    def act(self, obs: np.ndarray) -> int:
-        raise NotImplementedError("ConstructiveRandomAgent uses env.action_space_sample — call solve(env)")

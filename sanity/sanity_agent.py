@@ -13,7 +13,7 @@ import pytest
 # Add parent dir to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import load, SchEnv, Agent, RandomAgent, GreedyAgent, ConstructiveRandomAgent
+from src import load, SchEnv, Agent, RandomAgent, GreedyAgent
 from src.sch_env import EpisodeResult
 
 
@@ -47,8 +47,6 @@ def test_agent_name_property():
     g = GreedyAgent()
     assert g.name == "GreedyAgent"
 
-    c = ConstructiveRandomAgent()
-    assert c.name == "ConstructiveRandomAgent"
 
 
 def test_agent_repr():
@@ -108,50 +106,6 @@ def test_greedy_agent_better_than_random(dataset):
     # Greedy should generally find a better schedule
     assert r_greedy.best_cost <= r_random.best_cost
 
-
-def test_constructive_random_agent_construct(dataset):
-    """Check that ConstructiveRandomAgent.construct() returns a valid schedule."""
-    instance = dataset[0]
-    agent = ConstructiveRandomAgent(seed=42)
-
-    schedule = agent.construct(instance)
-
-    assert schedule is not None
-    assert len(schedule) == instance.n
-    assert set(schedule) == set(range(instance.n))
-
-
-def test_constructive_random_agent_solve(dataset):
-    """Check that ConstructiveRandomAgent.solve() uses constructed schedule."""
-    instance = dataset[0]
-    agent = ConstructiveRandomAgent(seed=42)
-
-    env = SchEnv(instance, h=0.4, max_steps=50, seed=42)
-    result = agent.solve(env, seed=42)
-
-    assert isinstance(result, EpisodeResult)
-    assert result.initial_cost > 0
-    assert result.best_cost > 0
-
-
-def test_constructive_better_initial(dataset):
-    """Check that constructive agent starts from a better initial cost."""
-    instance = dataset[0]
-
-    # Random init: expect random initial cost
-    env_random = SchEnv(instance, h=0.4, max_steps=1, seed=42)
-    r_random = RandomAgent().solve(env_random, seed=42)
-    random_initial = r_random.initial_cost
-
-    # Constructive init: should have lower initial cost
-    env_const = SchEnv(instance, h=0.4, max_steps=1, seed=42)
-    r_const = ConstructiveRandomAgent(seed=42).solve(env_const, seed=42)
-    const_initial = r_const.initial_cost
-
-    # Constructive heuristic should produce a better starting schedule
-    assert const_initial <= random_initial
-
-
 def test_agent_train_noop():
     """Check that Agent.train() is a no-op for non-learning agents."""
     agent = RandomAgent()
@@ -181,18 +135,6 @@ def test_greedy_agent_act_not_implemented():
     agent = GreedyAgent()
     with pytest.raises(NotImplementedError):
         agent.act(__import__("numpy").array([1.0, 2.0]))
-
-
-def test_all_agents_on_multiple_instances(dataset):
-    """Check that all agents work across different instances."""
-    for i, instance in enumerate(dataset.instances[:2]):
-        for agent_class in [RandomAgent, GreedyAgent, ConstructiveRandomAgent]:
-            env = SchEnv(instance, h=0.4, max_steps=20, seed=42)
-            agent = agent_class(seed=42) if agent_class == ConstructiveRandomAgent else agent_class()
-            result = agent.solve(env, seed=42)
-
-            assert result.best_cost > 0
-            assert result.n_steps > 0
 
 
 def test_agent_construct_default_none():

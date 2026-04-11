@@ -12,6 +12,8 @@ dependencies = [
     "torchvision",
     "numpy",
     "pandas>=2.3.3",
+    "py-spy>=0.4.1",
+    "numba>=0.65.0",
 ]
 
 [project.scripts]

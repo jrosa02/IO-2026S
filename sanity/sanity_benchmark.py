@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import load, RandomAgent, GreedyAgent, ConstructiveRandomAgent
+from src import load, RandomAgent, GreedyAgent
 from src.benchmark import BenchmarkRunner, AgentBenchmarkResult
 from src.sch_env import EpisodeResult
 

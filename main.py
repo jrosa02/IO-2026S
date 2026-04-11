@@ -53,11 +53,14 @@ def parse_args():
 
 
 def build_agents(agent_names: list[str], seed: int) -> dict:
-    from src.agent import RandomAgent, GreedyAgent, ConstructiveRandomAgent
+    from src.agent import RandomAgent, GreedyAgent 
+    from src.classical_agents import SimulatedAnnealingAgent, GeneticAlgorithmAgent
     mapping = {
         "random": ("Random", RandomAgent()),
         "greedy": ("Greedy", GreedyAgent()),
-        "constructive": ("Constructive", ConstructiveRandomAgent(seed=seed)),
+        "sa": ("SA", SimulatedAnnealingAgent()),
+        "genetic": ("Genetic", GeneticAlgorithmAgent())
+
     }
     agents = {}
     for name in agent_names:
