@@ -56,8 +56,7 @@ def build_agents(agent_names: list[str], seed: int) -> dict:
     from src.agent import RandomAgent, GreedyAgent, ConstructiveRandomAgent
     mapping = {
         "random": ("Random", RandomAgent()),
-        "greedy": ("Greedy", GreedyAgent()),
-        "constructive": ("Constructive", ConstructiveRandomAgent(seed=seed)),
+        "greedy": ("Greedy", GreedyAgent())
     }
     agents = {}
     for name in agent_names:
