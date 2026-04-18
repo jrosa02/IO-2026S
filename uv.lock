@@ -290,6 +290,15 @@ wheels = [
 ]
 
 [[package]]
+name = "gepa"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple/" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/62/10f5a8f24c075e3b64f952be73ba8e15f0055584bbcdf9ce48d754a36679/gepa-0.1.1.tar.gz", hash = "sha256:643fda01c23de4c9f01306e01305dd69facc29bcb34ad59e4cd07e6621d34aa1", size = 272251, upload-time = "2026-03-16T10:17:53.131Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/b7/8c72dedbb950d88a6f64588fcbc590d2a21e2b9f19b36aa6c5016c54ec75/gepa-0.1.1-py3-none-any.whl", hash = "sha256:71ead7c591eafcc727b83509cdc4182f20264800a6ddf8520d61419daeb47466", size = 244246, upload-time = "2026-03-16T10:17:51.922Z" },
+]
+
+[[package]]
 name = "graphviz"
 version = "0.21"
 source = { registry = "https://pypi.org/simple/" }
@@ -312,6 +321,7 @@ name = "io-2026s"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "gepa" },
     { name = "graphviz" },
     { name = "markupsafe" },
     { name = "matplotlib" },
@@ -325,6 +335,7 @@ dependencies = [
     { name = "torch", version = "2.10.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
     { name = "torchvision", version = "0.25.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torchvision", version = "0.25.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+    { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
@@ -335,6 +346,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gepa", specifier = ">=0.1.1" },
     { name = "graphviz", specifier = ">=0.21" },
     { name = "markupsafe", specifier = "==3.0.2" },
     { name = "matplotlib", specifier = ">=3.10.8" },
@@ -344,6 +356,7 @@ requires-dist = [
     { name = "py-spy", specifier = ">=0.4.1" },
     { name = "torch", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "tqdm", specifier = ">=4.66.5" },
 ]
 
 [package.metadata.requires-dev]
@@ -1483,6 +1496,17 @@ wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.25.0%2Bcpu-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:7d47d544899fabac52ebe0d4812975608fd7ab79a3d7fb6383275eb667e33f53" },
     { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.25.0%2Bcpu-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:9511339b3b5eb75229e0b5041202e8aed9bef3b1de3a715b9fb319c9e97688fd" },
     { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.25.0%2Bcpu-cp314-cp314t-win_amd64.whl", hash = "sha256:fb9f07f6a10f0ac24ac482ae68c6df99110b74a0d80a4c64fddc9753267d8815" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.66.5"
+source = { registry = "https://download.pytorch.org/whl/cpu" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+wheels = [
+    { url = "https://download.pytorch.org/whl/tqdm-4.66.5-py3-none-any.whl", hash = "sha256:90279a3770753eafc9194a0364852159802111925aa30eb3f9d85b0e805ac7cd" },
 ]
 
 [[package]]
