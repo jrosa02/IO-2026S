@@ -53,10 +53,14 @@ def parse_args():
 
 
 def build_agents(agent_names: list[str], seed: int) -> dict:
-    from src.agent import RandomAgent, GreedyAgent, ConstructiveRandomAgent
+    from src.agent import RandomAgent, GreedyAgent 
+    from src.classical_agents import SimulatedAnnealingAgent, GeneticAlgorithmAgent
     mapping = {
         "random": ("Random", RandomAgent()),
-        "greedy": ("Greedy", GreedyAgent())
+        "greedy": ("Greedy", GreedyAgent()),
+        "sa": ("SA", SimulatedAnnealingAgent()),
+        "genetic": ("Genetic", GeneticAlgorithmAgent())
+
     }
     agents = {}
     for name in agent_names:
@@ -74,7 +78,6 @@ def main():
 
     from src.orlib_sch import load
     from src.benchmark import BenchmarkRunner
-    from src.sch_env import SchEnv
     import src.visualize as viz
 
     out_dir = Path(args.out_dir)
@@ -103,35 +106,16 @@ def main():
         return
 
     print("Generating plots...")
-    first_agent = next(iter(results))
-    best_sched = results[first_agent].results[0].best_schedule
-    initial_sched = list(range(inst0.n))
 
-    viz.plot_cost_breakdown(inst0, best_sched, h=args.h, show=False,
+    viz.plot_cost_breakdown(results, inst0, h=args.h, show=False,
                             save_path=str(out_dir / "cost_breakdown.png"))
     print(f"  {out_dir}/cost_breakdown.png")
 
-    viz.plot_schedule_comparison(inst0, initial_sched, best_sched, h=args.h, show=False,
+    viz.plot_schedule_comparison(results, inst0, h=args.h, show=False,
                                  save_path=str(out_dir / "schedule_comparison.png"))
     print(f"  {out_dir}/schedule_comparison.png")
 
-    pairs = [(instances[i], results[first_agent].results[i].best_schedule)
-             for i in range(n)]
-    viz.plot_instance_summary_grid(pairs, h=args.h, show=False,
-                                   save_path=str(out_dir / "instance_grid.png"))
-    print(f"  {out_dir}/instance_grid.png")
-
-    cost_traces: dict[str, list[int]] = {}
-    for agent_name, agent in agents.items():
-        env = SchEnv(inst0, h=args.h, max_steps=args.max_steps, seed=args.seed)
-        agent.solve(env, seed=args.seed)
-        schedule = agent.initial_schedule[:]
-        costs = [int(env._compute_cost(schedule))]
-        for i, j in agent.actions:
-            schedule[i], schedule[j] = schedule[j], schedule[i]
-            costs.append(int(env._compute_cost(schedule)))
-        cost_traces[agent_name] = costs
-    viz.plot_convergence_curves(cost_traces, show=False,
+    viz.plot_convergence_curves(results, show=False,
                                 save_path=str(out_dir / "convergence.png"))
     print(f"  {out_dir}/convergence.png")
 

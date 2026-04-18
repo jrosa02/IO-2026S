@@ -10,7 +10,8 @@ Main exports for easy importing:
 
 from .orlib_sch import SchDataset, SchInstance, SchJob, load
 from .sch_env import SchEnv, EpisodeResult, run_episode
-from .agent import Agent, RandomAgent, GreedyAgent, ConstructiveRandomAgent
+from .agent import Agent, RandomAgent, GreedyAgent
+from .classical_agents import SimulatedAnnealingAgent, SAConfig, GeneticAlgorithmAgent, GAConfig
 from .benchmark import BenchmarkRunner, AgentBenchmarkResult
 
 # RL components (from sch_rl.py) are not yet available
@@ -42,7 +43,10 @@ __all__ = [
     "Agent",
     "RandomAgent",
     "GreedyAgent",
-    "ConstructiveRandomAgent",
+    "SimulatedAnnealingAgent",
+    "SAConfig",
+    "GeneticAlgorithmAgent",
+    "GAConfig",
     # Benchmark
     "BenchmarkRunner",
     "AgentBenchmarkResult",

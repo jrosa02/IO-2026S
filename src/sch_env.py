@@ -131,6 +131,7 @@ class SchEnv:
         # All possible swap moves
         self._pairs: list[tuple[int, int]] = _build_swap_pairs(self.n)
         self.n_actions: int = len(self._pairs)  # = n*(n-1)//2
+        self._pair_to_action: dict[tuple[int, int], int] = {p: i for i, p in enumerate(self._pairs)}
 
         # Observation size: 3*n job features + 3 scalars
         self.obs_size: int = 3 * self.n + 3
@@ -254,6 +255,10 @@ class SchEnv:
         """Return the (i, j) position pair for a given action index."""
         return self._pairs[action]
 
+    def encode_action(self, i: int, j: int) -> int:
+        """Return the action index for swap positions (i, j). O(1)."""
+        return self._pair_to_action[(i, j) if i < j else (j, i)]
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -304,6 +309,10 @@ class SchEnv:
     def best_cost(self) -> int:
         return self._best_cost
 
+    @property
+    def best_schedule(self) -> list[int]:
+        return self._best_schedule[:]
+
     def __repr__(self) -> str:
         return (
             f"SchEnv(instance={self.instance.index}, n={self.n}, "
@@ -331,6 +340,7 @@ class EpisodeResult:
     n_improvements: int
     improvement_pct: float
     best_schedule: list[int]
+    cost_history: list[int]
 
     def __repr__(self) -> str:
         return (
@@ -375,6 +385,7 @@ def run_episode(
     total_reward = 0.0
     n_improvements = 0
     prev_cost = info["cost"]
+    cost_history: list[int] = [int(initial_cost)]
 
     done = False
     while not done:
@@ -390,6 +401,7 @@ def run_episode(
         if info["cost"] < prev_cost:
             n_improvements += 1
         prev_cost = info["cost"]
+        cost_history.append(int(info["cost"]))
         done = terminated or truncated
         if verbose:
             print(
@@ -408,6 +420,7 @@ def run_episode(
         n_improvements=n_improvements,
         improvement_pct=info["improvement_pct"],
         best_schedule=info["best_schedule"],
+        cost_history=cost_history,
     )
 
 

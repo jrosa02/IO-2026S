@@ -69,6 +69,35 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
+import numpy as np
+from numba import njit
+
+# ---------------------------------------------------------------------------
+# JIT-compiled hot path
+# ---------------------------------------------------------------------------
+
+@njit(cache=True)
+def _evaluate_jit(
+    p: np.ndarray,
+    a: np.ndarray,
+    b: np.ndarray,
+    schedule: np.ndarray,
+    d: int,
+):
+    """Single-pass cost evaluation; no intermediate allocations."""
+    cost = 0
+    c = 0
+    for k in range(len(schedule)):
+        j = schedule[k]
+        c += p[j]
+        gap = c - d
+        if gap < 0:
+            cost -= a[j] * gap   # a[j] * (d - c)
+        elif gap > 0:
+            cost += b[j] * gap   # b[j] * (c - d)
+    return cost
+
+
 # ---------------------------------------------------------------------------
 # Data containers
 # ---------------------------------------------------------------------------
@@ -110,6 +139,9 @@ class SchInstance:
         if len(self.jobs) != self.n:
             raise ValueError(f"Instance {self.index}: declared n={self.n} but got {len(self.jobs)} jobs.")
         self.sum_p = sum(j.p for j in self.jobs)
+        self.p_array = np.array([job.p for job in self.jobs], dtype=np.int64)
+        self.a_array = np.array([job.a for job in self.jobs], dtype=np.int64)
+        self.b_array = np.array([job.b for job in self.jobs], dtype=np.int64)
 
     # ------------------------------------------------------------------
     # Derived quantities
@@ -127,7 +159,7 @@ class SchInstance:
         """
         if not 0.0 <= h <= 1.0:
             raise ValueError(f"h must be in [0, 1], got {h!r}.")
-        return math.floor(self.sum_p * h)
+        return np.floor(self.sum_p * h)
 
     # ------------------------------------------------------------------
     # Evaluation
@@ -149,18 +181,9 @@ class SchInstance:
         int
             Total penalty  Σ_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
         """
-        if sorted(schedule) != list(range(self.n)):
-            raise ValueError("schedule must be a permutation of 0 … n-1.")
-        d = self.due_date(h)
-        total = 0
-        time = 0
-        for idx in schedule:
-            job = self.jobs[idx]
-            time += job.p
-            early = max(0, d - time)
-            late = max(0, time - d)
-            total += job.a * early + job.b * late
-        return total
+        d = int(self.sum_p * h)
+        s = schedule if isinstance(schedule, np.ndarray) else np.asarray(schedule, dtype=np.int64)
+        return int(_evaluate_jit(self.p_array, self.a_array, self.b_array, s, d))
 
     # ------------------------------------------------------------------
     # Serialisation
