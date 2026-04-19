@@ -209,3 +209,5 @@ __marimo__/
 
 results/
 CLAUDE.md
+*.svg
+*.png 

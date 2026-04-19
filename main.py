@@ -5,17 +5,22 @@ Usage:
     python main.py [OPTIONS]
 
 Options:
-    --data PATH         Path to dataset file  [default: data/sch10.txt]
-    --n-instances INT   Number of instances to benchmark  [default: 5]
-    --h FLOAT           Due-date tightness parameter  [default: 0.4]
-    --max-steps INT     Max steps per episode  [default: 50]
-    --seed INT          RNG seed  [default: 42]
-    --out-dir PATH      Output directory for CSV and plots  [default: results]
-    --no-plots          Skip plot generation
-    --agents LIST       Comma-separated agents to run: random,greedy,constructive
-                        [default: random,greedy,constructive]
-    -v, --verbose       Show per-instance progress
-    -h, --help          Show this message and exit
+    --data PATH           Path to dataset file  [default: data/sch10.txt]
+    --n-instances INT     Number of instances to benchmark  [default: 5]
+    --h FLOAT             Due-date tightness parameter  [default: 0.4]
+    --max-steps INT       Max steps per episode  [default: 50]
+    --seed INT            RNG seed  [default: 42]
+    --out-dir PATH        Output directory for CSV and plots  [default: results]
+    --no-plots            Skip plot generation
+    --agents LIST         Comma-separated agents to run:
+                          random, greedy, sa, genetic, gepa-sa, gepa-ga
+                          [default: random,greedy,sa,genetic]
+    --train-instances INT Number of instances used for GEPA training  [default: 3]
+    --max-metric-calls INT GEPA evaluation budget  [default: 50]
+    --reflection-lm STR   LiteLLM model string for GEPA reflection LLM
+                          [default: ollama/qwen3:4b-instruct-2507-q4_K_M]
+    -v, --verbose         Show per-instance progress
+    -h, --help            Show this message and exit
 """
 
 import argparse
@@ -45,28 +50,61 @@ def parse_args():
                         help="Output directory for CSV and plots")
     parser.add_argument("--no-plots", action="store_true",
                         help="Skip plot generation")
-    parser.add_argument("--agents", default="random,greedy,constructive", metavar="LIST",
-                        help="Comma-separated agents: random,greedy,constructive")
+    parser.add_argument("--agents", default="random,greedy,sa,genetic", metavar="LIST",
+                        help="Comma-separated agents: random,greedy,sa,genetic,gepa-sa,gepa-ga")
+    parser.add_argument("--train-instances", type=int, default=3, metavar="INT",
+                        help="Instances used to train GEPA agents before benchmarking")
+    parser.add_argument("--max-metric-calls", type=int, default=50, metavar="INT",
+                        help="GEPA evaluation budget (total agent×instance runs)")
+    parser.add_argument("--reflection-lm", default="ollama/qwen3:4b-instruct-2507-q4_K_M", metavar="STR",
+                        help="LiteLLM model string for GEPA reflection LLM")
+    parser.add_argument("--interactions-log", default=None, metavar="PATH",
+                        help="Write raw GEPA LLM prompt/response pairs to this JSON file")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Show per-instance progress")
     return parser.parse_args()
 
 
-def build_agents(agent_names: list[str], seed: int) -> dict:
-    from src.agent import RandomAgent, GreedyAgent 
+def build_agents(
+    agent_names: list[str],
+    seed: int,
+    max_metric_calls: int,
+    reflection_lm: str,
+    interactions_log: str | None,
+) -> dict:
+    from src.agent import RandomAgent, GreedyAgent
     from src.classical_agents import SimulatedAnnealingAgent, GeneticAlgorithmAgent
-    mapping = {
-        "random": ("Random", RandomAgent()),
-        "greedy": ("Greedy", GreedyAgent()),
-        "sa": ("SA", SimulatedAnnealingAgent()),
-        "genetic": ("Genetic", GeneticAlgorithmAgent())
+    from src.configs import SAConfig, GAConfig
+    from src.gepa_agent import GEPAAgent
 
+    mapping = {
+        "random":  ("Random",  RandomAgent()),
+        "greedy":  ("Greedy",  GreedyAgent()),
+        "sa":      ("SA",      SimulatedAnnealingAgent()),
+        "genetic": ("Genetic", GeneticAlgorithmAgent()),
+        "gepa-sa": ("GEPA-SA", GEPAAgent(
+            base_agent_cls=SimulatedAnnealingAgent,
+            seed_config=SAConfig(),
+            reflection_lm=reflection_lm,
+            max_metric_calls=max_metric_calls,
+            seed=seed,
+            interactions_log=interactions_log,
+        )),
+        "gepa-ga": ("GEPA-GA", GEPAAgent(
+            base_agent_cls=GeneticAlgorithmAgent,
+            seed_config=GAConfig(),
+            reflection_lm=reflection_lm,
+            max_metric_calls=max_metric_calls,
+            seed=seed,
+            interactions_log=interactions_log,
+        )),
     }
     agents = {}
     for name in agent_names:
         key = name.strip().lower()
         if key not in mapping:
-            print(f"Unknown agent '{name}'. Choose from: random, greedy, constructive", file=sys.stderr)
+            valid = ", ".join(mapping)
+            print(f"Unknown agent '{name}'. Choose from: {valid}", file=sys.stderr)
             sys.exit(1)
         label, agent = mapping[key]
         agents[label] = agent
@@ -89,7 +127,25 @@ def main():
     instances = ds.instances[:n]
     inst0 = instances[0]
 
-    agents = build_agents(args.agents.split(","), args.seed)
+    agents = build_agents(
+        args.agents.split(","),
+        seed=args.seed,
+        max_metric_calls=args.max_metric_calls,
+        reflection_lm=args.reflection_lm,
+        interactions_log=args.interactions_log,
+    )
+
+    # Train any GEPA agents before benchmarking
+    from src.gepa_agent import GEPAAgent
+    gepa_agents = {label: agent for label, agent in agents.items() if isinstance(agent, GEPAAgent)}
+    if gepa_agents:
+        train_n = min(args.train_instances, n)
+        train_instances = instances[:train_n]
+        for label, agent in gepa_agents.items():
+            print(f"Training {label} with GEPA on {train_n} instance(s) "
+                  f"(max_metric_calls={args.max_metric_calls}, lm={args.reflection_lm})...")
+            agent.train(train_instances, h=args.h)
+            print(f"  {label} best config: {agent.best_config_}")
 
     print(f"Benchmarking {len(agents)} agent(s) on {n} instance(s) "
           f"(h={args.h}, max_steps={args.max_steps}, seed={args.seed})...")

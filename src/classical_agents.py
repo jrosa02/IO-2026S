@@ -24,12 +24,12 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import numpy as np
 from numba import njit
 
 from .agent import Agent
+from .configs import GAConfig, SAConfig
 
 
 @njit(cache=True)
@@ -57,15 +57,6 @@ from .sch_env import SchEnv, EpisodeResult
 # ---------------------------------------------------------------------------
 # Simulated Annealing
 # ---------------------------------------------------------------------------
-
-@dataclass
-class SAConfig:
-    T0: float = 100.0
-    b: float = 0.0005
-    c: float = 10
-    d: float = 50
-    T_min: float = 1e-5
-    temp_plot_file: str = "temperature_schedule.png"
 
 
 class SimulatedAnnealingAgent(Agent):
@@ -141,13 +132,6 @@ class SimulatedAnnealingAgent(Agent):
 # ---------------------------------------------------------------------------
 # Genetic Algorithm
 # ---------------------------------------------------------------------------
-@dataclass
-class GAConfig:
-    population_size: int = 100
-    generations: int = 10          # GA generations per re-optimization
-    mutation_rate: float = 0.1
-    elite_size: int = 5
-    reoptimize_every: int = 2      # how many steps between full GA runs
 
 
 class GeneticAlgorithmAgent(Agent):
