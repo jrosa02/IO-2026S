@@ -149,10 +149,27 @@ class HyperparamAdapter(SchedulingGEPAAdapter):
         self.max_steps = max_steps
         self.seed = seed
 
+    N_RUNS: int = 3
+
     def _run(self, instance: SchInstance, config: AgentConfig) -> EpisodeResult:
-        env = SchEnv(instance, h=self.h, max_steps=self.max_steps)
-        agent = self.base_agent_cls(config)
-        return agent.solve(env)
+        results = []
+        for _ in range(self.N_RUNS):
+            env = SchEnv(instance, h=self.h, max_steps=self.max_steps)
+            results.append(self.base_agent_cls(config).solve(env))
+        best = min(results, key=lambda r: r.best_cost)
+        return EpisodeResult(
+            instance_index=best.instance_index,
+            h=best.h,
+            initial_cost=round(sum(r.initial_cost for r in results) / self.N_RUNS),
+            final_cost=round(sum(r.final_cost for r in results) / self.N_RUNS),
+            best_cost=round(sum(r.best_cost for r in results) / self.N_RUNS),
+            total_reward=sum(r.total_reward for r in results) / self.N_RUNS,
+            n_steps=round(sum(r.n_steps for r in results) / self.N_RUNS),
+            n_improvements=round(sum(r.n_improvements for r in results) / self.N_RUNS),
+            improvement_pct=sum(r.improvement_pct for r in results) / self.N_RUNS,
+            best_schedule=best.best_schedule,
+            cost_history=best.cost_history,
+        )
 
     def _feedback(self, result: EpisodeResult) -> str:
         improvement = result.initial_cost - result.best_cost
