@@ -16,6 +16,8 @@ dependencies = [
     "numba>=0.65.0",
     "gepa",
     "ollama>=0.4.0",
+    "litellm>=1.83.0",
+    "pyinstrument>=5.1.2",
 ]
 
 [project.scripts]

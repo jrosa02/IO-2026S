@@ -30,27 +30,7 @@ from numba import njit
 
 from .agent import Agent
 from .configs import GAConfig, SAConfig
-
-
-@njit(cache=True)
-def _crossover_jit(p1: np.ndarray, p2: np.ndarray, a: int, b: int) -> np.ndarray:
-    """Order Crossover (OX) – compiled, single pass, no intermediate list."""
-    n = len(p1)
-    child = np.empty(n, dtype=np.int64)
-    child[a:b] = p1[a:b]
-
-    used = np.zeros(n, dtype=np.bool_)
-    for k in range(a, b):
-        used[p1[k]] = True
-
-    p2_ptr = 0
-    for k in range(n):
-        if k < a or k >= b:
-            while used[p2[p2_ptr]]:
-                p2_ptr += 1
-            child[k] = p2[p2_ptr]
-            p2_ptr += 1
-    return child
+from .optimized import batch_crossover_jit as _batch_crossover_jit  # type: ignore[import]
 from .sch_env import SchEnv, EpisodeResult
 
 
@@ -158,57 +138,71 @@ class GeneticAlgorithmAgent(Agent):
         def cost(schedule):
             return env.instance.evaluate(schedule, env.h)
 
+        @njit(cache=True)
         def random_perm():
-            p = list(range(n))
-            random.shuffle(p)
+            p = np.arange(n, dtype=np.int64)
+            np.random.shuffle(p)
             return p
 
-        def crossover(p1, p2):
-            a, b = sorted(random.sample(range(n), 2))
-            return _crossover_jit(
-                np.asarray(p1, dtype=np.int64),
-                np.asarray(p2, dtype=np.int64),
-                a, b,
-            ).tolist()
-
-        def mutate(p):
-            if random.random() < self.cfg.mutation_rate:
-                i, j = random.sample(range(n), 2)
+        def mutate(p: np.ndarray) -> None:
+            if np.random.random() < self.cfg.mutation_rate:
+                # Fisher-Yates pick
+                i = np.random.randint(n)
+                j = np.random.randint(n - 1)
+                if j >= i:
+                    j += 1
                 p[i], p[j] = p[j], p[i]
-            return p
 
-        def run_ga(current_schedule):
-            """Evolve a population starting from `current_schedule` and
-               return the best schedule found."""
-            # Initialize population: half random, half mutated copies of current
-            population = [random_perm() for _ in range(self.cfg.population_size // 2)]
-            population += [list(current_schedule) for _ in range(self.cfg.population_size - len(population))]
-            # add some mutations to the copies
-            for i in range(len(population) // 2, len(population)):
-                if random.random() < 0.5:
-                    population[i] = mutate(population[i])
+        def run_ga(current_schedule) -> tuple[list, int]:
+            cur = np.asarray(current_schedule, dtype=np.int64)
+            half = self.cfg.population_size // 2
+            population: list[np.ndarray] = (
+                [random_perm() for _ in range(half)]
+                + [cur.copy() for _ in range(self.cfg.population_size - half)]
+            )
+            for p in population[half:]:
+                if np.random.random() < 0.5:
+                    mutate(p)
 
-            best_schedule = current_schedule[:]
-            best_cost = cost(current_schedule)
+            best_schedule = cur.copy()
+            best_cost = cost(cur)
+            pool_k = max(2, self.cfg.population_size // 2)
+            n_ch = self.cfg.population_size - self.cfg.elite_size
 
             for _ in range(self.cfg.generations):
-                scored = [(cost(p), p) for p in population]
-                scored.sort(key=lambda x: x[0])
-                if scored[0][0] < best_cost:
-                    best_cost = scored[0][0]
-                    best_schedule = scored[0][1][:]
+                costs = [cost(p) for p in population]
+                order = np.argsort(costs)
 
-                # elitism
-                new_pop = [p[:] for (_, p) in scored[:self.cfg.elite_size]]
-                pool = [p for (_, p) in scored[:len(scored)//2]]
-                while len(new_pop) < self.cfg.population_size:
-                    p1, p2 = random.sample(pool, 2)
-                    child = crossover(p1, p2)
-                    child = mutate(child)
-                    new_pop.append(child)
-                population = new_pop
+                if costs[order[0]] < best_cost:
+                    best_cost = costs[order[0]]
+                    best_schedule = population[order[0]].copy()
 
-            return best_schedule, best_cost
+                elite = [population[order[i]].copy() for i in range(self.cfg.elite_size)]
+                pool = [population[order[i]] for i in range(pool_k)]
+
+                # Batch: generate all parent indices and cut points at once
+                pi = np.random.randint(0, pool_k, n_ch)
+                pj = np.random.randint(0, pool_k, n_ch)
+                pts = np.random.randint(0, n, (n_ch, 2))
+                same = pts[:, 0] == pts[:, 1]
+                if same.any():
+                    pts[same, 1] = (pts[same, 1] + 1) % n
+                a_pts = np.minimum(pts[:, 0], pts[:, 1]).astype(np.int32)
+                b_pts = np.maximum(pts[:, 0], pts[:, 1]).astype(np.int32)
+
+                # Single C call for the entire generation's crossover
+                children_mat = _batch_crossover_jit(
+                    np.stack([pool[i] for i in pi]),
+                    np.stack([pool[i] for i in pj]),
+                    a_pts, b_pts,
+                )
+                children = list(children_mat)  # row views into children_mat
+                for child in children:
+                    mutate(child)
+
+                population = elite + children
+
+            return best_schedule.tolist(), best_cost
 
         # ------------------------------------------------------------------
         # Main loop: take exactly env.max_steps actions

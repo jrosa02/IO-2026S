@@ -60,42 +60,110 @@ Quick start
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
+import logging
 import math
+import re
+import subprocess
 import urllib.request
 import warnings
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
-from numba import njit
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# JIT-compiled hot path
+# Hot path — C extension with numba fallback
 # ---------------------------------------------------------------------------
 
-@njit(cache=True)
-def _evaluate_jit(
-    p: np.ndarray,
-    a: np.ndarray,
-    b: np.ndarray,
-    schedule: np.ndarray,
-    d: int,
-):
-    """Single-pass cost evaluation; no intermediate allocations."""
-    cost = 0
-    c = 0
-    for k in range(len(schedule)):
-        j = schedule[k]
-        c += p[j]
-        gap = c - d
-        if gap < 0:
-            cost -= a[j] * gap   # a[j] * (d - c)
-        elif gap > 0:
-            cost += b[j] * gap   # b[j] * (c - d)
-    return cost
+try:
+    from .optimized import evaluate_jit as _evaluate_jit  # type: ignore[import]
+except ImportError:
+    try:
+        from numba import njit
+
+        @njit(cache=True)
+        def _evaluate_jit(p, a, b, schedule, d):
+            cost = 0
+            c = 0
+            for k in range(len(schedule)):
+                j = schedule[k]
+                c += p[j]
+                gap = c - d
+                if gap < 0:
+                    cost -= a[j] * gap
+                elif gap > 0:
+                    cost += b[j] * gap
+            return cost
+
+    except ImportError as exc:
+        raise ImportError(
+            "Neither the C extension (src/optimized) nor numba is available. "
+            "Build the extension with: python setup.py build_ext --inplace"
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# N-specialised kernel: compile optimized_core.c with -DN=<n>, load via ctypes
+# ---------------------------------------------------------------------------
+
+_CORE_C = Path(__file__).parent / "native_optimized" / "optimized_core.c"
+_COMPILED_DIR = Path(__file__).parent / "native_optimized" / "_compiled"
+
+# n -> ctypes callable (or None if compilation failed / not attempted)
+_specialised: dict[int, Any] = {}
+
+_c_p = ctypes.POINTER(ctypes.c_int64)
+
+
+def _compile_for_n(n: int) -> None:
+    """Compile optimized_core.c for a fixed job count *n* and cache the result."""
+    if n in _specialised:
+        return
+    if not _CORE_C.exists():
+        logger.warning("optimized_core.c not found; skipping specialised build for n=%d", n)
+        _specialised[n] = None
+        return
+
+    _COMPILED_DIR.mkdir(exist_ok=True)
+    out = _COMPILED_DIR / f"optimized_core_{n}.so"
+
+    if not out.exists():
+        cmd = [
+            "gcc", "-shared", "-fPIC",
+            "-O3", "-march=znver4", "-mtune=znver4",
+            "-mprefer-vector-width=512",       # Zen 4: 512-bit == 256-bit throughput
+            "-mavx512f", "-mavx512dq",         # native mullo_epi64, 8-wide int64
+            "-funroll-loops", "-fprefetch-loop-arrays",
+            "-fomit-frame-pointer", "-ffast-math",
+            "-fvect-cost-model=unlimited",     # don't suppress SIMD on cost grounds
+            "-std=c11",
+            f"-DN={n}",
+            "-o", str(out), str(_CORE_C),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            logger.info("Compiled specialised evaluator for n=%d → %s", n, out.name)
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            logger.warning("Specialised build failed for n=%d (%s); using generic evaluator.", n, exc)
+            _specialised[n] = None
+            return
+
+    lib = ctypes.CDLL(str(out))
+    lib.evaluate.restype = ctypes.c_int64
+    lib.evaluate.argtypes = [_c_p, _c_p, _c_p, _c_p, ctypes.c_int64]
+    _specialised[n] = lib.evaluate
+
+
+def _n_from_source(source: str) -> int | None:
+    """Extract job count from a sch*.txt filename, e.g. 'sch50.txt' → 50."""
+    m = re.search(r"sch(\d+)", Path(source).name)
+    return int(m.group(1)) if m else None
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +251,16 @@ class SchInstance:
         """
         d = int(self.sum_p * h)
         s = schedule if isinstance(schedule, np.ndarray) else np.asarray(schedule, dtype=np.int64)
+        fn = _specialised.get(self.n)
+        if fn is not None:
+            return int(fn(
+                self.p_array.ctypes.data_as(_c_p),
+                self.a_array.ctypes.data_as(_c_p),
+                self.b_array.ctypes.data_as(_c_p),
+                s.ctypes.data_as(_c_p),
+                ctypes.c_int64(d),
+            ))
+
         return int(_evaluate_jit(self.p_array, self.a_array, self.b_array, s, d))
 
     # ------------------------------------------------------------------
@@ -388,6 +466,9 @@ def load(source: str | Path) -> SchDataset:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
     text = path.read_text(encoding="utf-8", errors="replace")
+    n = _n_from_source(src_str)
+    if n is not None:
+        _compile_for_n(n)
     return _parse(text, source=str(path))
 
 

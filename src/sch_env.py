@@ -64,7 +64,6 @@ import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
-
 import numpy as np
 
 from .orlib_sch import SchInstance
@@ -269,14 +268,12 @@ class SchEnv:
 
     def _observe(self) -> np.ndarray:
         """Build the flat float32 observation vector."""
+        s = np.asarray(self._schedule)
         obs = np.empty(self.obs_size, dtype=np.float32)
-        for rank, job_idx in enumerate(self._schedule):
-            job = self.instance.jobs[job_idx]
-            base = rank * 3
-            obs[base] = job.p / self._max_p
-            obs[base + 1] = job.a / self._max_a
-            obs[base + 2] = job.b / self._max_b
-        # Scalar context
+        n = self.instance.n
+        obs[0:n * 3:3] = self.instance.p_array[s] / self._max_p
+        obs[1:n * 3:3] = self.instance.a_array[s] / self._max_a
+        obs[2:n * 3:3] = self.instance.b_array[s] / self._max_b
         obs[-3] = self._cost / self._initial_cost
         obs[-2] = self._step_count / self.max_steps
         obs[-1] = self.h
