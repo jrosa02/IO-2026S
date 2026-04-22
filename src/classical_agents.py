@@ -30,8 +30,28 @@ from numba import njit
 
 from .agent import Agent
 from .configs import GAConfig, SAConfig
-from .optimized import batch_crossover_jit as _batch_crossover_jit  # type: ignore[import]
 from .sch_env import SchEnv, EpisodeResult
+
+import importlib.util
+import sysconfig
+from pathlib import Path
+
+_batch_crossover_opt = None
+
+def _load_crossover_opt():
+    global _batch_crossover_opt
+    if _batch_crossover_opt is not None:
+        return
+    compiled_dir = Path(__file__).parent / "native_optimized" / "_compiled"
+    suffix = sysconfig.get_config_var('EXT_SUFFIX')
+    so_file = compiled_dir / f"crossover_opt{suffix}"
+    if so_file.exists():
+        spec = importlib.util.spec_from_file_location("crossover_opt", so_file)
+        crossover_opt_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(crossover_opt_mod)
+        _batch_crossover_opt = crossover_opt_mod.batch_crossover_opt
+    else:
+        raise ImportError(f"crossover_opt{suffix} not found in {compiled_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +141,7 @@ class GeneticAlgorithmAgent(Agent):
         self.cfg = cfg
 
     def solve(self, env: SchEnv, *, seed: int | None = None):
+        _load_crossover_opt()
         if seed is not None:
             random.seed(seed)
 
@@ -191,7 +212,7 @@ class GeneticAlgorithmAgent(Agent):
                 b_pts = np.maximum(pts[:, 0], pts[:, 1]).astype(np.int32)
 
                 # Single C call for the entire generation's crossover
-                children_mat = _batch_crossover_jit(
+                children_mat = _batch_crossover_opt(
                     np.stack([pool[i] for i in pi]),
                     np.stack([pool[i] for i in pj]),
                     a_pts, b_pts,
