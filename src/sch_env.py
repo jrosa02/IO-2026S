@@ -179,8 +179,7 @@ class SchEnv:
         obs : np.ndarray  shape (obs_size,)
         info : dict
         """
-        if seed is not None:
-            self._np_rng = np.random.default_rng(seed)
+        self._np_rng = np.random.default_rng(seed)
 
         if schedule is not None:
             self._schedule = np.asarray(schedule, dtype=np.int64)

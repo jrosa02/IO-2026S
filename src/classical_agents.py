@@ -45,6 +45,7 @@ class SimulatedAnnealingAgent(Agent):
 
     def __init__(self, cfg: SAConfig = SAConfig()):
         self.cfg = cfg
+        self._np_rng = np.random.default_rng()
 
     def _plot_temperature_schedule(self, temperatures):
         """Plot and save the temperature evolution over steps."""
