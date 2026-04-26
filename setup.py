@@ -28,11 +28,11 @@ class build_ext(_build_ext):
         super().run()
 
         # After all extensions are built, copy them to _compiled directory
-        compiled_dir = Path(__file__).parent / "src" / "native_optimized" / "_compiled"
+        compiled_dir = Path(__file__).parent / "src" / "native_optimized" / "__compiled__"
         compiled_dir.mkdir(exist_ok=True)
 
         print(f"\n{'='*70}")
-        print("Installing compiled extensions to _compiled/")
+        print("Installing compiled extensions to __compiled__/")
         print(f"{'='*70}")
 
         # Copy from build output to _compiled and remove from src/

@@ -1,171 +1,226 @@
 /*
  * evaluate_opt.c — weighted earliness/tardiness cost for the common due-date
- * scheduling problem, optimised for modern x86-64 (AVX2).
+ * scheduling problem.
  *
- * Python signature:
- *   evaluate_opt(p, a, b, schedule, d) -> int
- *
- *   p, a, b   : contiguous int64 numpy arrays, length n
- *   schedule  : contiguous int64 numpy array  (permutation of 0..n-1)
- *   d         : int  (common due date)
- *
- * AVX2 uses emulated _mm256_mullo_epi64 (not in standard AVX2) via
- * two 32-bit unsigned multiplies, correct for scheduling costs.
+ * Python signatures:
+ * evaluate_opt(p, a, b, schedule, d) -> int
+ * evaluate_swap_opt(p, a, b, schedule, d, i, j) -> int
+ * evaluate_batch_opt(p, a, b, schedules, d) -> np.ndarray shape (k,) int64
+ * evaluate_batch_swap_opt(p, a, b, schedule, d, i_arr, j_arr) -> np.ndarray shape (k,) int64
  */
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/arrayobject.h>
-
 #include <stdint.h>
 #include <stdlib.h>
 
-#ifdef __AVX2__
-#  include <immintrin.h>
-#  pragma message "evaluate_opt.c: AVX2 path selected"
-#else
-#  pragma message "evaluate_opt.c: scalar fallback"
-#endif
-
-#ifdef __AVX2__
-static __attribute__((always_inline)) inline __m256i
-_mm256_mullo_epi64_emu(__m256i a, __m256i b)
-{
-    __m256i lo    = _mm256_mul_epu32(a, b);
-    __m256i a_hi  = _mm256_srli_epi64(a, 32);
-    __m256i b_hi  = _mm256_srli_epi64(b, 32);
-    __m256i cross = _mm256_add_epi64(_mm256_mul_epu32(a,    b_hi),
-                                      _mm256_mul_epu32(a_hi, b));
-    return _mm256_add_epi64(lo, _mm256_slli_epi64(cross, 32));
-}
-#endif
+/* ==========================================================================
+ * LAYER 2 — CORE MATH (no PyObject*, pure C)
+ * ========================================================================== */
 
 static __attribute__((hot, noinline)) void
-build_ct(const int64_t *restrict p,
-         const int64_t *restrict schedule,
-         int64_t *restrict ct,
-         npy_intp n)
+build_completion_times(const int64_t *restrict processing_times,
+                       const int64_t *restrict schedule,
+                       int64_t *restrict completion_times,
+                       npy_intp n_jobs)
 {
-    int64_t c = 0;
-    for (npy_intp k = 0; k < n; k++) {
-        c      += p[schedule[k]];
-        ct[k]   = c;
+    int64_t cumulative_time = 0;
+    for (npy_intp k = 0; k < n_jobs; k++) {
+        cumulative_time     += processing_times[schedule[k]];
+        completion_times[k]  = cumulative_time;
     }
 }
 
-#ifdef __AVX2__
-static __attribute__((hot, target("avx2"))) int64_t
-cost_avx2(const int64_t *restrict a,
-          const int64_t *restrict b,
-          const int64_t *restrict schedule,
-          const int64_t *restrict ct,
-          npy_intp n,
-          int64_t d)
-{
-    const __m256i vd    = _mm256_set1_epi64x(d);
-    const __m256i vzero = _mm256_setzero_si256();
-    __m256i vacc        = _mm256_setzero_si256();
-
-    npy_intp k = 0;
-    for (; k + 4 <= n; k += 4) {
-        __m256i vct   = _mm256_loadu_si256((const __m256i *)(ct       + k));
-        __m256i vidx  = _mm256_loadu_si256((const __m256i *)(schedule + k));
-
-        __m256i va = _mm256_i64gather_epi64((const long long *)a, vidx, 8);
-        __m256i vb = _mm256_i64gather_epi64((const long long *)b, vidx, 8);
-
-        __m256i vgap  = _mm256_sub_epi64(vct, vd);
-        __m256i vneg  = _mm256_sub_epi64(vzero, vgap);
-
-        __m256i mlate  = _mm256_cmpgt_epi64(vgap, vzero);
-        __m256i mearly = _mm256_cmpgt_epi64(vneg,  vzero);
-
-        __m256i late_c  = _mm256_and_si256(mlate,
-                              _mm256_mullo_epi64_emu(vb, vgap));
-        __m256i early_c = _mm256_and_si256(mearly,
-                              _mm256_mullo_epi64_emu(va, vneg));
-
-        vacc = _mm256_add_epi64(vacc, late_c);
-        vacc = _mm256_add_epi64(vacc, early_c);
-    }
-
-    __m128i lo     = _mm256_castsi256_si128(vacc);
-    __m128i hi     = _mm256_extracti128_si256(vacc, 1);
-    __m128i sum128 = _mm_add_epi64(lo, hi);
-    int64_t cost   = (int64_t)(_mm_extract_epi64(sum128, 0) +
-                               _mm_extract_epi64(sum128, 1));
-
-    for (; k < n; k++) {
-        int64_t j   = schedule[k];
-        int64_t gap = ct[k] - d;
-        if (gap < 0)
-            cost -= a[j] * gap;
-        else if (gap > 0)
-            cost += b[j] * gap;
-    }
-    return cost;
-}
-#else
 static __attribute__((hot)) int64_t
-cost_scalar(const int64_t *restrict a,
-            const int64_t *restrict b,
+cost_scalar(const int64_t *restrict earliness_weights,
+            const int64_t *restrict tardiness_weights,
             const int64_t *restrict schedule,
-            const int64_t *restrict ct,
-            npy_intp n,
-            int64_t d)
+            const int64_t *restrict completion_times,
+            npy_intp n_jobs,
+            int64_t due_date)
 {
     int64_t cost = 0;
-    for (npy_intp k = 0; k < n; k++) {
-        int64_t j   = schedule[k];
-        int64_t gap = ct[k] - d;
-        if (gap < 0)
-            cost -= a[j] * gap;
-        else if (gap > 0)
-            cost += b[j] * gap;
+    for (npy_intp k = 0; k < n_jobs; k++) {
+        int64_t job_idx  = schedule[k];
+        int64_t time_gap = completion_times[k] - due_date;
+
+        if (time_gap < 0)
+            cost -= earliness_weights[job_idx] * time_gap;
+        else if (time_gap > 0)
+            cost += tardiness_weights[job_idx] * time_gap;
     }
     return cost;
 }
-#endif
+
+typedef struct {
+    const int64_t *p;
+    const int64_t *a;
+    const int64_t *b;
+} ProbData;
+
+static inline int64_t
+_evaluate(const ProbData *pd, const int64_t *s, npy_intp n_jobs, int64_t due_date)
+{
+    int64_t *ct = (int64_t *)malloc((size_t)n_jobs * sizeof(int64_t));
+    if (!ct) return -1;
+    build_completion_times(pd->p, s, ct, n_jobs);
+    int64_t result = cost_scalar(pd->a, pd->b, s, ct, n_jobs, due_date);
+    free(ct);
+    return result;
+}
+
+static void
+_evaluate_batch(const ProbData *pd, const int64_t *s,
+                npy_intp k, npy_intp n_jobs, int64_t due_date,
+                int64_t *out)
+{
+    int64_t *ct = (int64_t *)malloc((size_t)n_jobs * sizeof(int64_t));
+    if (!ct) return;
+    for (npy_intp row = 0; row < k; row++) {
+        const int64_t *sched = s + row * n_jobs;
+        build_completion_times(pd->p, sched, ct, n_jobs);
+        out[row] = cost_scalar(pd->a, pd->b, sched, ct, n_jobs, due_date);
+    }
+    free(ct);
+}
+
+/* ==========================================================================
+ * LAYER 1 — PYTHON C-API WRAPPERS (unpack/pack only, no logic)
+ * ========================================================================== */
+
+static inline ProbData
+extract_prob_data(PyArrayObject *p_arr, PyArrayObject *a_arr, PyArrayObject *b_arr)
+{
+    ProbData d;
+    d.p = (const int64_t *)PyArray_DATA(p_arr);
+    d.a = (const int64_t *)PyArray_DATA(a_arr);
+    d.b = (const int64_t *)PyArray_DATA(b_arr);
+    return d;
+}
 
 static PyObject *
 evaluate_opt(PyObject *self, PyObject *args)
 {
     PyArrayObject *p_arr, *a_arr, *b_arr, *sched_arr;
-    long long d;
+    long long due_date;
 
     if (!PyArg_ParseTuple(args, "O!O!O!O!L",
+                          &PyArray_Type, &p_arr, &PyArray_Type, &a_arr,
+                          &PyArray_Type, &b_arr, &PyArray_Type, &sched_arr, &due_date))
+        return NULL;
+
+    npy_intp n_jobs  = PyArray_SIZE(sched_arr);
+    ProbData pd      = extract_prob_data(p_arr, a_arr, b_arr);
+    const int64_t *s = (const int64_t *)PyArray_DATA(sched_arr);
+
+    int64_t result = _evaluate(&pd, s, n_jobs, (int64_t)due_date);
+    if (result == -1 && PyErr_NoMemory()) return NULL;
+    return PyLong_FromLongLong((long long)result);
+}
+
+static PyObject *
+evaluate_batch_opt(PyObject *self, PyObject *args)
+{
+    PyArrayObject *p_arr, *a_arr, *b_arr, *scheds_arr;
+    long long due_date;
+
+    if (!PyArg_ParseTuple(args, "O!O!O!O!L",
+                          &PyArray_Type, &p_arr, &PyArray_Type, &a_arr,
+                          &PyArray_Type, &b_arr, &PyArray_Type, &scheds_arr, &due_date))
+        return NULL;
+
+    npy_intp k       = PyArray_DIM(scheds_arr, 0);
+    npy_intp n_jobs  = PyArray_DIM(scheds_arr, 1);
+    ProbData pd      = extract_prob_data(p_arr, a_arr, b_arr);
+    const int64_t *s = (const int64_t *)PyArray_DATA(scheds_arr);
+
+    npy_intp dims[1] = {k};
+    PyArrayObject *out = (PyArrayObject *)PyArray_SimpleNew(1, dims, NPY_INT64);
+    if (!out) return NULL;
+
+    _evaluate_batch(&pd, s, k, n_jobs, (int64_t)due_date,
+                    (int64_t *)PyArray_DATA(out));
+    return (PyObject *)out;
+}
+
+static PyObject *
+evaluate_swap_opt(PyObject *self, PyObject *args)
+{
+    PyArrayObject *p_arr, *a_arr, *b_arr, *sched_arr;
+    long long due_date, pos_i, pos_j;
+
+    if (!PyArg_ParseTuple(args, "O!O!O!O!LLL",
+                          &PyArray_Type, &p_arr, &PyArray_Type, &a_arr,
+                          &PyArray_Type, &b_arr, &PyArray_Type, &sched_arr,
+                          &due_date, &pos_i, &pos_j))
+        return NULL;
+
+    npy_intp n_jobs = PyArray_SIZE(sched_arr);
+    ProbData pd     = extract_prob_data(p_arr, a_arr, b_arr);
+    int64_t *s      = (int64_t *)PyArray_DATA(sched_arr);
+
+    int64_t temp_job = s[pos_i]; s[pos_i] = s[pos_j]; s[pos_j] = temp_job;
+    int64_t result   = _evaluate(&pd, s, n_jobs, (int64_t)due_date);
+    s[pos_j] = s[pos_i]; s[pos_i] = temp_job;
+
+    if (result == -1 && PyErr_NoMemory()) return NULL;
+    return PyLong_FromLongLong((long long)result);
+}
+
+static PyObject *
+evaluate_batch_swap_opt(PyObject *self, PyObject *args)
+{
+    PyArrayObject *p_arr, *a_arr, *b_arr, *sched_arr, *i_arr, *j_arr;
+    long long due_date;
+
+    if (!PyArg_ParseTuple(args, "O!O!O!O!LO!O!",
                           &PyArray_Type, &p_arr,
                           &PyArray_Type, &a_arr,
                           &PyArray_Type, &b_arr,
                           &PyArray_Type, &sched_arr,
-                          &d))
+                          &due_date,
+                          &PyArray_Type, &i_arr,
+                          &PyArray_Type, &j_arr))
         return NULL;
 
-    npy_intp n = PyArray_SIZE(sched_arr);
-    const int64_t *p      = (const int64_t *)PyArray_DATA(p_arr);
-    const int64_t *a      = (const int64_t *)PyArray_DATA(a_arr);
-    const int64_t *b      = (const int64_t *)PyArray_DATA(b_arr);
-    const int64_t *sched  = (const int64_t *)PyArray_DATA(sched_arr);
+    npy_intp k             = PyArray_SIZE(i_arr);
+    npy_intp n_jobs        = PyArray_SIZE(sched_arr);
+    ProbData pd            = extract_prob_data(p_arr, a_arr, b_arr);
+    int64_t *s             = (int64_t *)PyArray_DATA(sched_arr);
+    const int64_t *pos_is  = (const int64_t *)PyArray_DATA(i_arr);
+    const int64_t *pos_js  = (const int64_t *)PyArray_DATA(j_arr);
 
-    int64_t *ct = (int64_t *)malloc((size_t)n * sizeof(int64_t));
-    if (!ct) return PyErr_NoMemory();
+    npy_intp dims[1] = {k};
+    PyArrayObject *out = (PyArrayObject *)PyArray_SimpleNew(1, dims, NPY_INT64);
+    if (!out) return NULL;
+    int64_t *costs = (int64_t *)PyArray_DATA(out);
 
-    build_ct(p, sched, ct, n);
+    for (npy_intp b_idx = 0; b_idx < k; b_idx++) {
+        int64_t i_idx    = pos_is[b_idx];
+        int64_t j_idx    = pos_js[b_idx];
+        int64_t temp_job = s[i_idx]; s[i_idx] = s[j_idx]; s[j_idx] = temp_job;
+        costs[b_idx]     = _evaluate(&pd, s, n_jobs, (int64_t)due_date);
+        s[j_idx] = s[i_idx]; s[i_idx] = temp_job;
+    }
 
-#ifdef __AVX2__
-    int64_t result = cost_avx2(a, b, sched, ct, n, (int64_t)d);
-#else
-    int64_t result = cost_scalar(a, b, sched, ct, n, (int64_t)d);
-#endif
-
-    free(ct);
-    return PyLong_FromLongLong((long long)result);
+    return (PyObject *)out;
 }
+
+/* ==========================================================================
+ * MODULE INIT
+ * ========================================================================== */
+
 static PyMethodDef methods[] = {
-    {"evaluate_opt", evaluate_opt, METH_VARARGS,
-     "evaluate_opt(p, a, b, schedule, d) -> int\n"
-     "AVX2-vectorised weighted earliness+tardiness cost."},
+    {"evaluate_opt",            evaluate_opt,            METH_VARARGS,
+     "evaluate_opt(p, a, b, schedule, d) -> int"},
+    {"evaluate_batch_opt",      evaluate_batch_opt,      METH_VARARGS,
+     "evaluate_batch_opt(p, a, b, schedules, d) -> np.ndarray shape (k,) int64"},
+    {"evaluate_swap_opt",       evaluate_swap_opt,       METH_VARARGS,
+     "evaluate_swap_opt(p, a, b, schedule, d, i, j) -> int"},
+    {"evaluate_batch_swap_opt", evaluate_batch_swap_opt, METH_VARARGS,
+     "evaluate_batch_swap_opt(p, a, b, schedule, d, i_arr, j_arr) -> np.ndarray shape (k,) int64"},
     {NULL, NULL, 0, NULL}
 };
 

@@ -27,31 +27,13 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 from numba import njit
+from numpy.random import Generator
 
 from .agent import Agent
 from .configs import GAConfig, SAConfig
+from .native_optimized import batch_crossover as _batch_crossover_opt
+from .native_optimized import evaluate_batch_swap as _evaluate_batch_swap
 from .sch_env import SchEnv, EpisodeResult
-
-import importlib.util
-import sysconfig
-from pathlib import Path
-
-_batch_crossover_opt = None
-
-def _load_crossover_opt():
-    global _batch_crossover_opt
-    if _batch_crossover_opt is not None:
-        return
-    compiled_dir = Path(__file__).parent / "native_optimized" / "_compiled"
-    suffix = sysconfig.get_config_var('EXT_SUFFIX')
-    so_file = compiled_dir / f"crossover_opt{suffix}"
-    if so_file.exists():
-        spec = importlib.util.spec_from_file_location("crossover_opt", so_file)
-        crossover_opt_mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(crossover_opt_mod)
-        _batch_crossover_opt = crossover_opt_mod.batch_crossover_opt
-    else:
-        raise ImportError(f"crossover_opt{suffix} not found in {compiled_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +59,7 @@ class SimulatedAnnealingAgent(Agent):
 
     def solve(self, env: SchEnv, *, seed: int | None = None):
         if seed is not None:
-            random.seed(seed)
+            self._np_rng = np.random.default_rng(seed)
 
         env.reset()
         self._solve_init(env)
@@ -85,23 +67,35 @@ class SimulatedAnnealingAgent(Agent):
         initial_cost = env.current_cost
         current_cost = initial_cost
         total_reward = 0.0
-        temperatures = []
+        temperatures = np.ndarray((env.max_steps))
+
+        inst = env.instance
+        d    = int(inst.sum_p * env.h)
+        p, a, b = inst.p_array, inst.a_array, inst.b_array
+        _I = np.empty(4, dtype=np.int64)
+        _J = np.empty(4, dtype=np.int64)
 
         for step in range(env.max_steps):
             T = (self.cfg.T0 * math.exp(-step * self.cfg.b) +
                  self.cfg.c * (math.sin(step / self.cfg.d))**2)
             T = max(T, self.cfg.T_min)
-            temperatures.append(T)
+            temperatures[step] = T
 
+            looping = 4
             while True:
-                action = env.action_space_sample()
-                i, j = env.decode_action(action)
-                temp_schedule = env.current_schedule
-                temp_schedule[i], temp_schedule[j] = temp_schedule[j], temp_schedule[i]
-                new_cost = env.instance.evaluate(temp_schedule, env.h)
-                delta = new_cost - current_cost
-                if delta < 0 or random.random() < math.exp(-delta / T):
-                    break
+                acts = env.action_space_samples(looping)
+                for k in range(4):
+                    _I[k], _J[k] = env.decode_action(acts[k])
+                costs = _evaluate_batch_swap(p, a, b, env._schedule, d, _I, _J)
+                for k in range(4):
+                    delta = int(costs[k]) - current_cost
+                    if delta < 0 or self._np_rng.random() < math.exp(-delta / T):
+                        action = acts[k]
+                        i, j = int(_I[k]), int(_J[k])
+                        break
+                else:
+                    continue
+                break
 
             _, reward, _, _, _ = env.step(action)
             current_cost = env.current_cost
@@ -109,7 +103,7 @@ class SimulatedAnnealingAgent(Agent):
             self.actions.append((i, j))
             self.cost_history.append(env.best_cost)
 
-        self._plot_temperature_schedule(temperatures)
+        # self._plot_temperature_schedule(temperatures)
 
         best_cost = env.best_cost
         n_improvements = sum(
@@ -139,11 +133,11 @@ class GeneticAlgorithmAgent(Agent):
 
     def __init__(self, cfg: GAConfig = GAConfig()):
         self.cfg = cfg
+        self._np_rng = np.random.default_rng()
 
     def solve(self, env: SchEnv, *, seed: int | None = None):
-        _load_crossover_opt()
         if seed is not None:
-            random.seed(seed)
+            self._np_rng = np.random.default_rng(seed)
 
         env.reset()
         self._solve_init(env)
@@ -159,17 +153,16 @@ class GeneticAlgorithmAgent(Agent):
         def cost(schedule):
             return env.instance.evaluate(schedule, env.h)
 
-        @njit(cache=True)
-        def random_perm():
+        def random_perm(_np_rng: Generator):
             p = np.arange(n, dtype=np.int64)
-            np.random.shuffle(p)
+            _np_rng.shuffle(p)
             return p
 
         def mutate(p: np.ndarray) -> None:
-            if np.random.random() < self.cfg.mutation_rate:
+            if self._np_rng.random() < self.cfg.mutation_rate:
                 # Fisher-Yates pick
-                i = np.random.randint(n)
-                j = np.random.randint(n - 1)
+                i = self._np_rng.integers(0, n)
+                j = self._np_rng.integers(n - 1)
                 if j >= i:
                     j += 1
                 p[i], p[j] = p[j], p[i]
@@ -178,11 +171,11 @@ class GeneticAlgorithmAgent(Agent):
             cur = np.asarray(current_schedule, dtype=np.int64)
             half = self.cfg.population_size // 2
             population: list[np.ndarray] = (
-                [random_perm() for _ in range(half)]
+                [random_perm(self._np_rng) for _ in range(half)]
                 + [cur.copy() for _ in range(self.cfg.population_size - half)]
             )
             for p in population[half:]:
-                if np.random.random() < 0.5:
+                if self._np_rng.random() < 0.5:
                     mutate(p)
 
             best_schedule = cur.copy()
@@ -202,9 +195,9 @@ class GeneticAlgorithmAgent(Agent):
                 pool = [population[order[i]] for i in range(pool_k)]
 
                 # Batch: generate all parent indices and cut points at once
-                pi = np.random.randint(0, pool_k, n_ch)
-                pj = np.random.randint(0, pool_k, n_ch)
-                pts = np.random.randint(0, n, (n_ch, 2))
+                pi = self._np_rng.integers(0, pool_k, n_ch)
+                pj = self._np_rng.integers(0, pool_k, n_ch)
+                pts = self._np_rng.integers(0, n, (n_ch, 2))
                 same = pts[:, 0] == pts[:, 1]
                 if same.any():
                     pts[same, 1] = (pts[same, 1] + 1) % n
@@ -238,7 +231,7 @@ class GeneticAlgorithmAgent(Agent):
                 target, target_cost = run_ga(current)
 
             if current == target:
-                action = env.action_space_sample()
+                action = env.action_space_samples()
                 i, j = env.decode_action(action)
             else:
                 i, j = next(

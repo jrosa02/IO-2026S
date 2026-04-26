@@ -65,22 +65,24 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 import numpy as np
+from numba import njit
+from numpy.random import Generator
 
 from .orlib_sch import SchInstance
+from .native_optimized import evaluate_swap, evaluate_batch_swap
 
 # ---------------------------------------------------------------------------
 # Action encoding helpers
 # ---------------------------------------------------------------------------
 
 
-def _build_swap_pairs(n: int) -> list[tuple[int, int]]:
+def _build_swap_pairs(n: int) -> np.ndarray[tuple[int, int]]:
     """Return all (i, j) pairs with i < j, in lexicographic order."""
     pairs = []
     for i in range(n):
         for j in range(i + 1, n):
             pairs.append((i, j))
-    return pairs
-
+    return np.array(pairs, dtype=np.int64)
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -128,9 +130,9 @@ class SchEnv:
         self.reward_shaping = reward_shaping
 
         # All possible swap moves
-        self._pairs: list[tuple[int, int]] = _build_swap_pairs(self.n)
+        self._pairs: np.ndarray[tuple[int, int]] = _build_swap_pairs(self.n)
         self.n_actions: int = len(self._pairs)  # = n*(n-1)//2
-        self._pair_to_action: dict[tuple[int, int], int] = {p: i for i, p in enumerate(self._pairs)}
+        self._pair_to_action: dict[tuple[int, int], int] = {tuple(p): i for i, p in enumerate(self._pairs)}
 
         # Observation size: 3*n job features + 3 scalars
         self.obs_size: int = 3 * self.n + 3
@@ -141,15 +143,14 @@ class SchEnv:
         self._max_b = max(j.b for j in instance.jobs) or 1
 
         # RNG
-        self._rng = random.Random(seed)
         self._np_rng = np.random.default_rng(seed)
 
         # Mutable state (initialised properly on reset())
-        self._schedule: list[int] = list(range(self.n))
+        self._schedule: np.ndarray = np.arange(self.n, dtype=np.int64)
         self._cost: int = 0
         self._initial_cost: int = 1  # set on reset
         self._best_cost: int = 0
-        self._best_schedule: list[int] = list(range(self.n))
+        self._best_schedule: np.ndarray = np.arange(self.n, dtype=np.int64)
         self._step_count: int = 0
         self._done: bool = True
 
@@ -179,19 +180,18 @@ class SchEnv:
         info : dict
         """
         if seed is not None:
-            self._rng = random.Random(seed)
             self._np_rng = np.random.default_rng(seed)
 
         if schedule is not None:
-            self._schedule = list(schedule)
+            self._schedule = np.asarray(schedule, dtype=np.int64)
         else:
-            self._schedule = list(range(self.n))
-            self._rng.shuffle(self._schedule)
+            self._schedule = np.arange(self.n, dtype=np.int64)
+            self._np_rng.shuffle(self._schedule)
 
         self._cost = self._compute_cost(self._schedule)
         self._initial_cost = max(self._cost, 1)  # guard against zero
         self._best_cost = self._cost
-        self._best_schedule = self._schedule[:]
+        self._best_schedule = self._schedule.copy()
         self._step_count = 0
         self._done = False
 
@@ -222,14 +222,14 @@ class SchEnv:
         cost_before = self._cost
 
         # Apply swap in-place
-        i, j = self._pairs[action]
+        i, j = self.decode_action(action)
         self._schedule[i], self._schedule[j] = self._schedule[j], self._schedule[i]
         self._cost = self._compute_cost(self._schedule)
 
         # Track best seen
         if self._cost < self._best_cost:
             self._best_cost = self._cost
-            self._best_schedule = self._schedule[:]
+            self._best_schedule = self._schedule.copy()
 
         delta = cost_before - self._cost
         reward = delta / self._initial_cost if self.reward_shaping else float(delta)
@@ -246,13 +246,26 @@ class SchEnv:
     # Action space helpers
     # ------------------------------------------------------------------
 
-    def action_space_sample(self) -> int:
-        """Sample a uniformly random action."""
-        return self._rng.randrange(self.n_actions)
+    def action_space_samples(self, n:int = 1) -> np.ndarray|int:
+        samples =  self._np_rng.integers(0, self.n_actions, n)
+        if n == 1:
+            samples = samples[0]
+        return samples
+
+    @staticmethod
+    @njit("(int64, int64)", cache=True)
+    def _decode_action_formula(n: int, action: int) -> tuple:
+        """Numba-compiled O(1) decoder via quadratic formula.
+        Cumulative pairs before row i = i*(2n-i-1)/2.
+        Solve i*(2n-i-1)/2 = action → i = ((2n-1) - sqrt((2n-1)²-8k)) / 2.
+        """
+        i = int((2*n - 1 - np.sqrt((2*n - 1)**2 - 8*action)) / 2)
+        j = action - i*(2*n - i - 1)//2 + i + 1
+        return i, j
 
     def decode_action(self, action: int) -> tuple[int, int]:
-        """Return the (i, j) position pair for a given action index."""
-        return self._pairs[action]
+        """Return the (i, j) position pair for a given action index. O(1) formula."""
+        return self._decode_action_formula(self.n, action)
 
     def encode_action(self, i: int, j: int) -> int:
         """Return the action index for swap positions (i, j). O(1)."""
@@ -262,13 +275,20 @@ class SchEnv:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _compute_cost(self, schedule: list[int]) -> int:
+    def _compute_cost(self, schedule: np.ndarray) -> int:
         """Evaluate the cost of *schedule* against this instance."""
         return self.instance.evaluate(schedule, self.h)
 
+    def evaluate_swap(self, i: int, j: int, h: float) -> int:
+        """Speculatively evaluate the cost of swapping positions i and j (one C call)."""
+        d = int(self.instance.sum_p * h)
+        return int(evaluate_swap(
+            self.instance.p_array, self.instance.a_array, self.instance.b_array,
+            self._schedule, d, i, j))
+
     def _observe(self) -> np.ndarray:
         """Build the flat float32 observation vector."""
-        s = np.asarray(self._schedule)
+        s = self._schedule
         obs = np.empty(self.obs_size, dtype=np.float32)
         n = self.instance.n
         obs[0:n * 3:3] = self.instance.p_array[s] / self._max_p
@@ -283,7 +303,7 @@ class SchEnv:
         return {
             "cost": self._cost,
             "best_cost": self._best_cost,
-            "best_schedule": self._best_schedule[:],
+            "best_schedule": self._best_schedule.tolist(),
             "step": self._step_count,
             "initial_cost": self._initial_cost,
             "improvement": self._initial_cost - self._best_cost,
@@ -296,7 +316,7 @@ class SchEnv:
 
     @property
     def current_schedule(self) -> list[int]:
-        return self._schedule[:]
+        return self._schedule.tolist()
 
     @property
     def current_cost(self) -> int:
@@ -308,7 +328,7 @@ class SchEnv:
 
     @property
     def best_schedule(self) -> list[int]:
-        return self._best_schedule[:]
+        return self._best_schedule.tolist()
 
     def __repr__(self) -> str:
         return (
@@ -489,14 +509,14 @@ if __name__ == "__main__":
     print(env)
     
     print("\nSingle episode with random policy:")
-    result = run_episode(env, policy_fn=env.action_space_sample, seed=0)
+    result = run_episode(env, policy_fn=env.action_space_samples, seed=0)
     print(result)
 
     print("\nBatch run over 2 instances:")
     cfg = DatasetRunConfig(h=0.4, max_steps=50, seed=1, verbose=False)
     results = run_dataset(
         ds.instances[:2],
-        lambda env: env.action_space_sample,
+        lambda env: env.action_space_samples,
         cfg=cfg,
     )
     for r in results:

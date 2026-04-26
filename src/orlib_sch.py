@@ -60,136 +60,22 @@ Quick start
 from __future__ import annotations
 
 import argparse
-import ctypes
 import json
 import logging
 import math
-import re
-import subprocess
 import urllib.request
 import warnings
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import numpy as np
 
+from .native_optimized import evaluate
+from .native_optimized import evaluate_swap
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Hot path — C extension with numba fallback
-# ---------------------------------------------------------------------------
-
-try:
-    import importlib.util
-    import sysconfig
-    compiled_dir = Path(__file__).parent / "native_optimized" / "_compiled"
-    suffix = sysconfig.get_config_var('EXT_SUFFIX')
-    so_file = compiled_dir / f"evaluate_opt{suffix}"
-    if so_file.exists():
-        spec = importlib.util.spec_from_file_location("evaluate_opt", so_file)
-        evaluate_opt_mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(evaluate_opt_mod)
-        _evaluate_opt = evaluate_opt_mod.evaluate_opt
-    else:
-        raise ImportError(f"evaluate_opt{suffix} not found in {compiled_dir}")
-except (ImportError, ModuleNotFoundError, FileNotFoundError):
-    try:
-        from numba import njit
-
-        @njit(cache=True)
-        def _evaluate_opt(p, a, b, schedule, d):
-            cost = 0
-            c = 0
-            for k in range(len(schedule)):
-                j = schedule[k]
-                c += p[j]
-                gap = c - d
-                if gap < 0:
-                    cost -= a[j] * gap
-                elif gap > 0:
-                    cost += b[j] * gap
-            return cost
-
-    except ImportError as exc:
-        raise ImportError(
-            "Neither the C extension (src/evaluate_opt) nor numba is available. "
-            "Build the extension with: python setup.py build_ext --inplace"
-        ) from exc
-
-
-# ---------------------------------------------------------------------------
-# N-specialised kernel: compile evaluate_simd.c with -DN=<n>, load via ctypes
-# ---------------------------------------------------------------------------
-
-_CORE_C = Path(__file__).parent / "native_optimized" / "evaluate_simd.c"
-_COMPILED_DIR = Path(__file__).parent / "native_optimized" / "_compiled"
-
-# n -> ctypes callable (or None if evaluate_simd.c not found)
-_specialised: dict[int, Any] = {}
-
-_c_p = ctypes.POINTER(ctypes.c_int64)
-
-
-def _compile_for_n(n: int) -> None:
-    """Compile evaluate_simd.c for a fixed job count *n* and cache the result."""
-    if n in _specialised:
-        return
-    if not _CORE_C.exists():
-        logger.debug("evaluate_simd.c not found; skipping specialised build for n=%d", n)
-        _specialised[n] = None
-        return
-
-    _COMPILED_DIR.mkdir(exist_ok=True)
-    out = _COMPILED_DIR / f"evaluate_simd_{n}.so"
-
-    if not out.exists():
-        cmd = [
-            "gcc", "-shared", "-fPIC",
-            "-O3", "-march=native",
-            "-funroll-loops", "-fprefetch-loop-arrays",
-            "-fomit-frame-pointer", "-ffast-math",
-            "-std=c11",
-            f"-DN={n}",
-            "-o", str(out), str(_CORE_C),
-        ]
-        try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            if result.stderr:
-                for line in result.stderr.splitlines():
-                    if line.strip():
-                        print(line)
-            logger.info("Compiled specialised evaluator for n=%d → %s", n, out.name)
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(
-                f"Failed to compile specialised evaluator for n={n}.\n"
-                f"Command: {' '.join(cmd)}\n"
-                f"Stderr: {exc.stderr}"
-            ) from exc
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                f"gcc not found. Cannot compile specialised evaluator for n={n}.\n"
-                f"Please install gcc or use the generic evaluator."
-            ) from exc
-
-    try:
-        lib = ctypes.CDLL(str(out))
-        lib.evaluate.restype = ctypes.c_int64
-        lib.evaluate.argtypes = [_c_p, _c_p, _c_p, _c_p, ctypes.c_int64]
-        _specialised[n] = lib.evaluate
-    except OSError as exc:
-        raise RuntimeError(
-            f"Failed to load compiled evaluator from {out}.\n"
-            f"The compiled binary may be incompatible with this system.\n"
-            f"Error: {exc}"
-        ) from exc
-
-
-def _n_from_source(source: str) -> int | None:
-    """Extract job count from a sch*.txt filename, e.g. 'sch50.txt' → 50."""
-    m = re.search(r"sch(\d+)", Path(source).name)
-    return int(m.group(1)) if m else None
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +145,7 @@ class SchInstance:
     # Evaluation
     # ------------------------------------------------------------------
 
-    def evaluate(self, schedule: Sequence[int], h: float) -> int:
+    def evaluate(self, schedule: Sequence[int] | np.ndarray, h: float) -> int:
         """
         Compute the total weighted earliness + tardiness cost of a schedule.
 
@@ -277,17 +163,7 @@ class SchInstance:
         """
         d = int(self.sum_p * h)
         s = schedule if isinstance(schedule, np.ndarray) else np.asarray(schedule, dtype=np.int64)
-        fn = _specialised.get(self.n)
-        if fn is not None:
-            return int(fn(
-                self.p_array.ctypes.data_as(_c_p),
-                self.a_array.ctypes.data_as(_c_p),
-                self.b_array.ctypes.data_as(_c_p),
-                s.ctypes.data_as(_c_p),
-                ctypes.c_int64(d),
-            ))
-
-        return int(_evaluate_opt(self.p_array, self.a_array, self.b_array, s, d))
+        return int(evaluate(self.p_array, self.a_array, self.b_array, s, d))
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -492,9 +368,6 @@ def load(source: str | Path) -> SchDataset:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
     text = path.read_text(encoding="utf-8", errors="replace")
-    n = _n_from_source(src_str)
-    if n is not None:
-        _compile_for_n(n)
     return _parse(text, source=str(path))
 
 
