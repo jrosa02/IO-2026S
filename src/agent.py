@@ -202,7 +202,7 @@ class RandomAgent(Agent):
         """Run an episode with a random policy using the env's own RNG."""
         env.reset(seed=seed)
         self._solve_init(env)
-        recording_policy = self._make_recording_policy(env, env.action_space_samples)
+        recording_policy = self._make_recording_policy(env, lambda _: env.action_space_samples())
         return run_episode(env, recording_policy, seed=None, start_schedule=self.initial_schedule)
 
 
