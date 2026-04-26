@@ -163,6 +163,11 @@ def main():
 
     print("Generating plots...")
 
+    for label, agent in gepa_agents.items():
+        gepa_path = out_dir / f"gepa_history_{label.replace('-', '_')}.png"
+        viz.plot_gepa_history(agent, show=False, save_path=str(gepa_path))
+        print(f"  {gepa_path}")
+
     viz.plot_cost_breakdown(results, inst0, h=args.h, show=False,
                             save_path=str(out_dir / "cost_breakdown.png"))
     print(f"  {out_dir}/cost_breakdown.png")

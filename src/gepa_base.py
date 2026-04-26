@@ -52,6 +52,8 @@ class SchedulingGEPAAdapter:
 
     def __init__(self, seed_config: AgentConfig) -> None:
         self.seed_config = seed_config
+        self.history_: list[dict] = []  # populated by evaluate(); one entry per GEPA call
+        self._call_idx: int = 0
 
     # ------------------------------------------------------------------
     # Abstract hooks for subclasses
@@ -104,6 +106,19 @@ class SchedulingGEPAAdapter:
                 score = 0.0
             outputs.append(result)
             scores.append(score)
+
+        mean_score = float(sum(scores) / len(scores)) if scores else 0.0
+        best_so_far = max(
+            (e["mean_score"] for e in self.history_), default=0.0
+        )
+        self.history_.append({
+            "call_idx": self._call_idx,
+            "config_params": {k: v for k, v in vars(config).items() if not k.startswith("_")},
+            "scores": scores,
+            "mean_score": mean_score,
+            "best_so_far": max(mean_score, best_so_far),
+        })
+        self._call_idx += 1
 
         trajectories = outputs if capture_traces else None
         return EvaluationBatch(outputs=outputs, scores=scores, trajectories=trajectories)

@@ -13,6 +13,7 @@ from .sch_env import SchEnv, EpisodeResult, run_episode
 from .agent import Agent, RandomAgent, GreedyAgent
 from .classical_agents import SimulatedAnnealingAgent, SAConfig, GeneticAlgorithmAgent, GAConfig
 from .benchmark import BenchmarkRunner, AgentBenchmarkResult
+from .visualize import plot_gepa_history
 
 # RL components (from sch_rl.py) are not yet available
 # from .sch_rl import (
@@ -50,6 +51,8 @@ __all__ = [
     # Benchmark
     "BenchmarkRunner",
     "AgentBenchmarkResult",
+    # Visualisation
+    "plot_gepa_history",
     # RL components from sch_rl.py (not yet available)
     # "PPOAgent", "PPOConfig", "ActorCritic", "RolloutBuffer", "TrainLog",
     # "train", "evaluate", "evaluate_batch", "benchmark",

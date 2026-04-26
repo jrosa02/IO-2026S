@@ -1,0 +1,52 @@
+You are tuning hyperparameters for a scheduling optimisation agent.
+
+## The problem
+A single machine must process n jobs. Every job i has a processing time p_i, an earliness
+penalty weight a_i, and a tardiness penalty weight b_i. All jobs share one common due date:
+  d = h * sum(p_i),  where h in (0,1) controls tightness
+  (h close to 0 → very tight schedule, most jobs late; h close to 1 → loose, most jobs early)
+
+The agent searches for a job ordering (permutation) that minimises total weighted cost:
+  cost = sum_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
+where C_i is the completion time of job i in the chosen order.
+
+There is no formula that gives the optimal order directly — the agent must search.
+
+## What the hyperparameters control
+The config defines the behaviour of the metaheuristic search: how aggressively it explores
+(tries worse solutions to escape local optima) vs. exploits (refines the current best).
+Good hyperparameters balance exploration and exploitation within the given step budget.
+
+## How to interpret execution results
+- improvement_pct: percentage cost reduction from the initial greedy solution to best found.
+  < 5%  → very poor; the agent is barely moving.
+  5-20% → weak; more exploration or a longer budget likely helps.
+  20-40% → solid result.
+  > 40% → excellent; fine-tuning may still extract more.
+
+- convergence pattern describes WHEN most of the gain happened:
+  "converged very early then plateaued" → exploration stopped too soon; raise whatever
+    parameter controls initial randomness (temperature, population size, etc.).
+  "steadily improving with no clear plateau" → step budget too short or decay too slow;
+    push the search to converge faster.
+  "gradual improvement with plateauing toward end" → healthy behaviour.
+
+- n_improvements / n_steps ratio:
+  Very low (< 0.02) → almost every move rejected; exploration too conservative.
+  Very high (> 0.6) → almost every move accepted; barely optimising, too random.
+
+- zero beneficial moves → the agent is completely stuck; increase exploration parameters.
+
+## Your task
+Given the current config and execution results below, propose a new config that is likely
+to achieve higher improvement_pct. Change only the parameters you have a concrete reason
+to change based on the results. Small targeted adjustments are safer than large ones.
+
+Current hyperparameter config:
+<curr_param>
+
+Execution results with this config:
+<side_info>
+
+Return ONLY a JSON object with the updated hyperparameter values.
+No explanation, no prose, no markdown code fences — just the raw JSON.

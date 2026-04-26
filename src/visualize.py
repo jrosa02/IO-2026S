@@ -915,6 +915,190 @@ def plot_agent_comparison(
 
 
 # ---------------------------------------------------------------------------
+# GEPA optimisation history plots
+# ---------------------------------------------------------------------------
+
+
+def plot_gepa_history(
+    gepa_agent,
+    *,
+    seed_result: "EpisodeResult | None" = None,
+    best_result: "EpisodeResult | None" = None,
+    figsize: tuple[float, float] = (16, 12),
+    save_path: str | Path | None = None,
+    show: bool = True,
+) -> tuple[plt.Figure, list[plt.Axes]]:
+    """
+    Visualise the GEPA hyperparameter optimisation history.
+
+    Produces four subplots:
+
+    1. **Score per call** — scatter of mean improvement% at every GEPA
+       evaluate() call, with the cumulative-best line overlaid.
+    2. **Per-instance score spread** — box plots (one per call) showing
+       variance across the training batch.
+    3. **Config parameter evolution** — one line per hyperparameter, showing
+       how the LLM mutates values over the search.
+    4. **Baseline vs best** — bar chart comparing seed-config and best-config
+       improvement% side by side (requires *seed_result* and *best_result*).
+
+    Parameters
+    ----------
+    gepa_agent : GEPAAgent
+        A trained GEPAAgent with a populated ``history_`` attribute.
+    seed_result : EpisodeResult | None
+        Episode result from the seed config on a test instance, for comparison.
+    best_result : EpisodeResult | None
+        Episode result from the best found config on the same instance.
+    figsize : tuple
+    save_path : str | Path | None
+    show : bool
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    axes : list of matplotlib.axes.Axes
+    """
+    history = gepa_agent.history_
+    if not history:
+        raise ValueError("GEPAAgent.history_ is empty — call train() first.")
+
+    call_idxs = [e["call_idx"] for e in history]
+    mean_scores = [e["mean_score"] * 100.0 for e in history]  # back to percent
+    best_so_far = [e["best_so_far"] * 100.0 for e in history]
+    all_scores = [
+        [s * 100.0 for s in e["scores"]] for e in history
+    ]
+
+    # Collect param names (exclude file-path strings)
+    param_keys = [
+        k for k, v in history[0]["config_params"].items()
+        if isinstance(v, (int, float))
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    axes = axes.flatten()
+    cmap = plt.get_cmap("tab10")
+
+    # --- Subplot 1: mean score per call + cumulative best ---
+    ax = axes[0]
+    ax.scatter(call_idxs, mean_scores, s=40, color="#3498db", alpha=0.7, zorder=3, label="mean score")
+    ax.plot(call_idxs, best_so_far, color="#e74c3c", linewidth=2.0, label="cumulative best")
+    ax.set_xlabel("GEPA call index", fontsize=10, fontweight="bold")
+    ax.set_ylabel("Mean improvement %", fontsize=10, fontweight="bold")
+    ax.set_title("Score per GEPA evaluation call", fontsize=11, fontweight="bold")
+    ax.legend(fontsize=9)
+    ax.grid(alpha=0.3)
+    if best_so_far:
+        ax.annotate(
+            f"best: {max(best_so_far):.1f}%",
+            xy=(call_idxs[best_so_far.index(max(best_so_far))], max(best_so_far)),
+            xytext=(10, -15), textcoords="offset points",
+            fontsize=8, color="#e74c3c",
+            arrowprops=dict(arrowstyle="->", color="#e74c3c", lw=1.2),
+        )
+
+    # --- Subplot 2: per-instance score spread as box plots ---
+    ax = axes[1]
+    bp = ax.boxplot(
+        all_scores,
+        positions=call_idxs,
+        widths=max(1, len(call_idxs) // 20) * 0.6,
+        patch_artist=True,
+        manage_ticks=False,
+    )
+    for patch in bp["boxes"]:
+        patch.set_facecolor("#3498db")
+        patch.set_alpha(0.5)
+    ax.plot(call_idxs, mean_scores, color="#2c3e50", linewidth=1.2, alpha=0.5, label="mean")
+    ax.set_xlabel("GEPA call index", fontsize=10, fontweight="bold")
+    ax.set_ylabel("Improvement % (per instance)", fontsize=10, fontweight="bold")
+    ax.set_title("Per-instance score spread across calls", fontsize=11, fontweight="bold")
+    ax.legend(fontsize=9)
+    ax.grid(alpha=0.3)
+
+    # --- Subplot 3: config parameter evolution ---
+    ax = axes[2]
+    for p_idx, key in enumerate(param_keys):
+        values = [e["config_params"].get(key) for e in history]
+        if any(v is None for v in values):
+            continue
+        # Normalise each param to [0,1] for readability on a shared axis
+        lo, hi = min(values), max(values)
+        norm = [(v - lo) / (hi - lo) if hi > lo else 0.5 for v in values]
+        color = cmap(p_idx % 10)
+        ax.plot(call_idxs, norm, color=color, linewidth=1.6, label=key, marker=".", markersize=4)
+    ax.set_xlabel("GEPA call index", fontsize=10, fontweight="bold")
+    ax.set_ylabel("Normalised parameter value [0, 1]", fontsize=10, fontweight="bold")
+    ax.set_title("Hyperparameter evolution (each param normalised)", fontsize=11, fontweight="bold")
+    ax.legend(fontsize=8, ncol=2)
+    ax.grid(alpha=0.3)
+
+    # --- Subplot 4: baseline vs best comparison (or summary if no results given) ---
+    ax = axes[3]
+    if seed_result is not None and best_result is not None:
+        labels = ["Seed config", "GEPA best"]
+        improv = [seed_result.improvement_pct, best_result.improvement_pct]
+        colors = ["#95a5a6", "#27ae60"]
+        bars = ax.bar(labels, improv, color=colors, alpha=0.85, width=0.4)
+        for bar, val in zip(bars, improv):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.5,
+                f"{val:.1f}%",
+                ha="center", va="bottom", fontsize=11, fontweight="bold",
+            )
+        ax.set_ylabel("Improvement %", fontsize=10, fontweight="bold")
+        ax.set_title("Seed config vs GEPA best", fontsize=11, fontweight="bold")
+        ax.grid(axis="y", alpha=0.3)
+    else:
+        # Show summary stats text instead
+        ax.axis("off")
+        n_calls = len(history)
+        best_pct = max(best_so_far)
+        first_pct = mean_scores[0] if mean_scores else 0.0
+        gain = best_pct - first_pct
+        best_params = history[best_so_far.index(max(best_so_far))]["config_params"]
+        lines = [
+            "GEPA search summary",
+            "=" * 32,
+            f"Total evaluate() calls : {n_calls}",
+            f"First mean score       : {first_pct:.2f}%",
+            f"Best mean score        : {best_pct:.2f}%",
+            f"Gain over seed         : {gain:+.2f}%",
+            "",
+            "Best config params:",
+        ]
+        for k, v in best_params.items():
+            if isinstance(v, float):
+                lines.append(f"  {k:20s}: {v:.6g}")
+            else:
+                lines.append(f"  {k:20s}: {v}")
+        ax.text(
+            0.05, 0.95, "\n".join(lines),
+            transform=ax.transAxes, fontsize=9,
+            verticalalignment="top", fontfamily="monospace",
+            bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8),
+        )
+
+    agent_label = getattr(gepa_agent, "name", type(gepa_agent).__name__)
+    fig.suptitle(
+        f"GEPA optimisation history — {agent_label}  ({len(history)} calls)",
+        fontsize=13, fontweight="bold",
+    )
+    fig.tight_layout()
+
+    if save_path is not None:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"[visualize] Saved GEPA history to {save_path}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+    return fig, list(axes)
+
+
+# ---------------------------------------------------------------------------
 # Demo / Self-test
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,69 @@
+You are tuning hyperparameters for a Simulated Annealing (SA) agent that solves a combinatorial scheduling problem.
+
+## The problem
+A single machine must process n jobs. Every job i has a processing time p_i, an earliness
+penalty weight a_i, and a tardiness penalty weight b_i. All jobs share one common due date:
+  d = h * sum(p_i),  where h in (0,1) controls tightness
+  (h close to 0 → very tight schedule, most jobs late; h close to 1 → loose, most jobs early)
+
+The agent searches for a job ordering (permutation) that minimises total weighted cost:
+  cost = sum_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
+where C_i is the completion time of job i in the chosen order.
+
+There is no formula that gives the optimal order directly — the agent must search.
+
+## How Simulated Annealing works here
+SA starts from a (typically greedy) initial permutation and iteratively proposes random
+neighbour solutions by swapping two jobs. It accepts improvements always, and accepts
+worse solutions with probability exp(-delta_cost / T), where T is the current temperature.
+
+Temperature schedule used:
+  T(step) = T0 * exp(-step * b) + c * sin(step / d)^2
+
+- T0: initial temperature. Controls how freely the search accepts worse solutions at the
+  start. Too low → gets trapped in the first local optimum. Too high → pure random walk.
+- b: exponential decay rate. Controls how fast the temperature drops. Higher b → faster
+  cooling → less exploration over time. Typical useful range: 1e-5 to 0.1.
+- c: amplitude of periodic sinusoidal reheating. Set to 0 to disable reheating entirely.
+  Positive values add oscillating bursts of higher temperature to escape local optima.
+- d: period of the sinusoidal term in steps. Larger d → slower reheating cycles.
+- T_min: hard floor; temperature never drops below this. Prevents the search from freezing
+  completely. Rarely needs changing unless b is very small.
+
+## How to interpret execution results
+- improvement_pct: percentage reduction from the initial greedy cost to the best found.
+  < 5%  → nearly no improvement; SA is stuck or cooling too fast.
+  5-20% → weak; try higher T0 or slower decay.
+  20-40% → solid result.
+  > 40% → excellent; fine-tuning cooling or reheating may extract a little more.
+
+- convergence pattern describes WHEN improvement happened:
+  "converged very early then plateaued" → T0 is too high or b too low; the search
+    is random early then freezes; try reducing T0 or increasing b slightly.
+  "converged in first half then plateaued" → normal-ish; small b increase may help.
+  "steadily improving with no clear plateau" → step budget was too short or b too large;
+    try reducing b so cooling is slower.
+  "gradual improvement with plateauing toward end" → healthy behaviour.
+
+- n_improvements / n_steps ratio:
+  Very low (< 0.02) → almost every move is rejected; T is too low for the problem scale,
+    raise T0 or reduce b.
+  Very high (> 0.6) → almost every move is accepted; temperature is too high, barely
+    optimising; raise b or lower T0.
+
+- zero beneficial moves → completely stuck; raise T0 significantly.
+
+## Your task
+Given the current config and execution results below, propose a new config that is likely
+to achieve higher improvement_pct. Change only the parameters you have a concrete reason
+to change. Small targeted adjustments are safer than large jumps. If reheating is disabled
+(c=0) and the agent is plateauing early, consider enabling it with a small c value.
+
+Current hyperparameter config:
+<curr_param>
+
+Execution results with this config:
+<side_info>
+
+Return ONLY a JSON object with the updated hyperparameter values.
+No explanation, no prose, no markdown code fences — just the raw JSON.

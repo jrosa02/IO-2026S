@@ -1,0 +1,74 @@
+You are tuning hyperparameters for a Genetic Algorithm (GA) agent that solves a combinatorial scheduling problem.
+
+## The problem
+A single machine must process n jobs. Every job i has a processing time p_i, an earliness
+penalty weight a_i, and a tardiness penalty weight b_i. All jobs share one common due date:
+  d = h * sum(p_i),  where h in (0,1) controls tightness
+  (h close to 0 → very tight schedule, most jobs late; h close to 1 → loose, most jobs early)
+
+The agent searches for a job ordering (permutation) that minimises total weighted cost:
+  cost = sum_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
+where C_i is the completion time of job i in the chosen order.
+
+There is no formula that gives the optimal order directly — the agent must search.
+
+## How the Genetic Algorithm works here
+The GA maintains a population of candidate job orderings (permutations). Each generation:
+1. Elite individuals (top elite_size by cost) are copied unchanged to the next generation.
+2. The remaining slots are filled by Order Crossover (OX) of two selected parents.
+3. Each child is mutated with probability mutation_rate (one random swap applied).
+4. Every reoptimize_every steps during the episode, the GA re-runs for `generations`
+   generations starting from the current best solution.
+
+The GA runs as an inner loop inside the episode: it is re-triggered periodically, so
+the total number of GA generations executed = (n_steps / reoptimize_every) * generations.
+
+## Hyperparameter effects
+- population_size: more individuals → broader search per generation, but each generation
+  costs more time (fewer total calls fit in the step budget). Sweet spot typically 20–100.
+- generations: GA iterations per re-optimisation call. More generations → deeper search
+  each time it fires. Increasing this while reducing reoptimize_every can trade breadth
+  for depth.
+- mutation_rate: probability of applying one random swap to a child after crossover.
+  Too low → population converges to a clone of the best (premature convergence).
+  Too high → search becomes random; children look nothing like their parents.
+  Useful range: 0.01–0.3.
+- elite_size: top individuals carried over unchanged. Prevents losing the best solution
+  found so far. Should be small relative to population_size (1–5 typically).
+- reoptimize_every: how often (in episode steps) the GA is re-invoked. Smaller values
+  → more frequent GA calls → more generations total, but each call starts from less
+  episode context. Larger values → fewer calls but each starts from a more refined base.
+
+## How to interpret execution results
+- improvement_pct: percentage reduction from initial greedy cost to best found.
+  < 5%  → very poor; population may have converged too fast or mutation is too low.
+  5-20% → weak; try larger population or higher mutation_rate.
+  20-40% → solid.
+  > 40% → excellent; fine-tune mutation or elite_size for marginal gains.
+
+- convergence pattern:
+  "converged very early then plateaued" → population converged prematurely; raise
+    mutation_rate or increase population_size to maintain diversity.
+  "steadily improving with no clear plateau" → step budget too short or reoptimize_every
+    too large; decrease reoptimize_every so the GA fires more often.
+  "gradual improvement with plateauing toward end" → healthy behaviour.
+
+- n_improvements / n_steps: low ratio means the GA keeps re-discovering solutions it
+  already knows; increase population_size or mutation_rate to introduce new candidates.
+
+- zero beneficial moves → mutation_rate too low or elite_size too large relative to
+  population_size; the population is homogeneous.
+
+## Your task
+Given the current config and execution results below, propose a new config that is likely
+to achieve higher improvement_pct. Change only the parameters you have a concrete reason
+to change. Small targeted adjustments are safer than large jumps.
+
+Current hyperparameter config:
+<curr_param>
+
+Execution results with this config:
+<side_info>
+
+Return ONLY a JSON object with the updated hyperparameter values.
+No explanation, no prose, no markdown code fences — just the raw JSON.

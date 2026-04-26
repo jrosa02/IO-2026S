@@ -40,34 +40,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REFLECTION_PROMPT = (
-    "You are optimising hyperparameters for a scheduling agent that solves the "
-    "single-machine common due-date problem (minimise weighted earliness + tardiness). "
-    "Analyse the execution results and propose a config that improves solution quality.\n\n"
-    "Current hyperparameter config:\n<curr_param>\n\n"
-    "Execution results with this config:\n<side_info>\n\n"
-    "Return only a JSON object with the new hyperparameter values. No prose, no markdown fences."
-)
+def _load_prompt(name: str) -> str:
+    path = Path(__file__).parent.parent / "prompts" / name
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    raise FileNotFoundError(f"Prompt file not found: {path}")
 
-_SA_REFLECTION_PROMPT = (
-    "You are optimising hyperparameters for a Simulated Annealing agent that solves the "
-    "single-machine common due-date scheduling problem (minimise weighted earliness + tardiness). "
-    "The temperature schedule is T(step) = T0 * exp(-step * b) + c * sin(step / d)^2. "
-    "Higher T0 and smaller b allow more exploration early; c and d control periodic reheating.\n\n"
-    "Current hyperparameter config:\n<curr_param>\n\n"
-    "Execution results with this config:\n<side_info>\n\n"
-    "Return only a JSON object with the new hyperparameter values. No prose, no markdown fences."
-)
 
-_GA_REFLECTION_PROMPT = (
-    "You are optimising hyperparameters for a Genetic Algorithm agent that solves the "
-    "single-machine common due-date scheduling problem (minimise weighted earliness + tardiness). "
-    "The GA uses Order Crossover (OX) and elitism. Larger populations explore more but cost more; "
-    "higher mutation_rate increases diversity; reoptimize_every controls how often the target is refreshed.\n\n"
-    "Current hyperparameter config:\n<curr_param>\n\n"
-    "Execution results with this config:\n<side_info>\n\n"
-    "Return only a JSON object with the new hyperparameter values. No prose, no markdown fences."
-)
+_DEFAULT_REFLECTION_PROMPT = _load_prompt("default_reflection.txt")
+_SA_REFLECTION_PROMPT = _load_prompt("sa_reflection.txt")
+_GA_REFLECTION_PROMPT = _load_prompt("ga_reflection.txt")
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +236,7 @@ class GEPAAgent(Agent):
         self.seed = seed
         self.interactions_log = Path(interactions_log) if interactions_log else None
         self.best_config_: AgentConfig = seed_config
+        self.history_: list[dict] = []  # populated after train(); one entry per GEPA evaluate() call
 
         if reflection_prompt is not None:
             self.reflection_prompt = reflection_prompt
@@ -333,6 +316,8 @@ class GEPAAgent(Agent):
                     encoding="utf-8",
                 )
                 logger.info("Logged %d LLM interaction(s) to %s", len(interactions), self.interactions_log)
+
+        self.history_ = adapter.history_
 
         try:
             self.best_config_ = self.seed_config.from_prompt(result.best_candidate["config"])
