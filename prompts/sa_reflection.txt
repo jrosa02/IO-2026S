@@ -62,7 +62,13 @@ to change. Small targeted adjustments are safer than large jumps. If reheating i
 Current hyperparameter config:
 <curr_param>
 
-Execution results with this config:
+## Data provided below
+<side_info> contains two sections:
+1. **Optimization history** — a table of every config tried so far, its mean composite
+   score (quality − time_penalty), and wall time. Use this to avoid repeating configs
+   that already failed and to identify the trend of improving parameters.
+2. **Current execution results** — per-instance outcomes for the config shown above.
+
 <side_info>
 
 Return ONLY a JSON object with the updated hyperparameter values.

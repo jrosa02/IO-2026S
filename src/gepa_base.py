@@ -15,6 +15,7 @@ SchedulingGEPAAdapter
 from __future__ import annotations
 
 import logging
+import time
 import warnings
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
@@ -50,10 +51,13 @@ class SchedulingGEPAAdapter:
     # Required by the GEPAAdapter protocol — None means use the default LLM proposer.
     propose_new_texts = None
 
+    TIME_PENALTY_WEIGHT: float = 0.2
+
     def __init__(self, seed_config: AgentConfig) -> None:
         self.seed_config = seed_config
         self.history_: list[dict] = []  # populated by evaluate(); one entry per GEPA call
         self._call_idx: int = 0
+        self._max_elapsed_s: float | None = None  # running max wall time across all _run() calls
 
     # ------------------------------------------------------------------
     # Abstract hooks for subclasses
@@ -95,19 +99,37 @@ class SchedulingGEPAAdapter:
         config = self._parse_candidate(candidate)
         outputs: list[EpisodeResult] = []
         scores: list[float] = []
+        quality_scores: list[float] = []
+        elapsed_times: list[float] = []
 
         for instance in batch:
             try:
+                t0 = time.perf_counter()
                 result = self._run(instance, config)
-                score = result.improvement_pct / 100.0
+                elapsed = time.perf_counter() - t0
+                quality = result.improvement_pct / 100.0
             except Exception as exc:
                 warnings.warn(f"_run failed on instance {instance.index}: {exc}", stacklevel=2)
                 result = _zero_result(instance)
-                score = 0.0
+                quality = 0.0
+                elapsed = 0.0
+
+            if elapsed > (self._max_elapsed_s or 0.0):
+                self._max_elapsed_s = elapsed
+
+            if self._max_elapsed_s:
+                t_norm = elapsed / self._max_elapsed_s
+                score = quality - self.TIME_PENALTY_WEIGHT * t_norm
+            else:
+                score = quality
+
             outputs.append(result)
             scores.append(score)
+            quality_scores.append(quality)
+            elapsed_times.append(elapsed)
 
         mean_score = float(sum(scores) / len(scores)) if scores else 0.0
+        mean_quality = float(sum(quality_scores) / len(quality_scores)) if quality_scores else 0.0
         best_so_far = max(
             (e["mean_score"] for e in self.history_), default=0.0
         )
@@ -116,7 +138,11 @@ class SchedulingGEPAAdapter:
             "config_params": {k: v for k, v in vars(config).items() if not k.startswith("_")},
             "scores": scores,
             "mean_score": mean_score,
+            "quality_scores": quality_scores,
+            "mean_quality": mean_quality,
             "best_so_far": max(mean_score, best_so_far),
+            "elapsed_s": elapsed_times,
+            "mean_elapsed_s": sum(elapsed_times) / len(elapsed_times) if elapsed_times else 0.0,
         })
         self._call_idx += 1
 
@@ -138,11 +164,16 @@ class SchedulingGEPAAdapter:
 
         Each record gives the LLM the current config text, the numeric outcome,
         and a plain-English diagnosis so it can propose a targeted mutation.
+        The first record is an optimization history summary when prior calls exist.
         """
         if eval_batch.trajectories is None:
             return {"config": []}
 
-        records = []
+        records: list[dict] = []
+
+        if self.history_:
+            records.append({"Optimization history (all previous calls)": self._format_history_summary()})
+
         for result in eval_batch.trajectories:
             records.append(
                 {
@@ -158,6 +189,22 @@ class SchedulingGEPAAdapter:
             )
 
         return {"config": records}
+
+    def _format_history_summary(self) -> str:
+        """Format self.history_ as a compact table for LLM injection."""
+        lines = ["call | mean_score | time_s | params"]
+        lines.append("-----|------------|--------|-------")
+        for entry in self.history_:
+            params_str = ", ".join(
+                f"{k}={v}" for k, v in entry["config_params"].items()
+            )
+            lines.append(
+                f"{entry['call_idx']:4d} | "
+                f"{entry['mean_score']:10.3f} | "
+                f"{entry.get('mean_elapsed_s', 0.0):6.2f} | "
+                f"{params_str}"
+            )
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Internal helpers

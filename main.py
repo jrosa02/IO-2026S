@@ -24,10 +24,34 @@ Options:
 """
 
 import argparse
+import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+
+
+def _run_tag(args) -> str:
+    """Build a short, human-readable tag from the key run parameters."""
+    dataset = Path(args.data).stem                          # sch10, sch100, …
+    agents  = args.agents.replace(",", "-")                 # sa-genetic, gepa-sa, …
+    h_str   = f"h{args.h}"                                  # h0.4
+    n_str   = f"n{args.n_instances}"                        # n5
+    s_str   = f"s{args.max_steps}"                          # s50
+
+    parts = [dataset, agents, h_str, n_str, s_str]
+
+    # For GEPA runs append a short model name
+    if any(a.strip().startswith("gepa") for a in args.agents.split(",")):
+        lm = args.reflection_lm
+        lm = re.sub(r"^[^/]+/", "", lm)        # strip "ollama/" prefix
+        lm = re.sub(r"-instruct.*", "", lm)     # strip "-instruct-…" suffix
+        lm = lm[:20]                            # hard cap
+        parts.append(lm)
+
+    parts.append(datetime.now().strftime("%Y%m%d_%H%M%S"))
+    return "_".join(parts)
 
 
 def parse_args():
@@ -118,8 +142,10 @@ def main():
     from src.benchmark import BenchmarkRunner
     import src.visualize as viz
 
-    out_dir = Path(args.out_dir)
+    tag = _run_tag(args)
+    out_dir = Path(args.out_dir) / tag
     out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Run tag: {tag}")
 
     print(f"Loading dataset from {args.data}...")
     ds = load(args.data)
@@ -127,12 +153,17 @@ def main():
     instances = ds.instances[:n]
     inst0 = instances[0]
 
+    # If --interactions-log is just a filename (no directory), put it in out_dir
+    interactions_log = args.interactions_log
+    if interactions_log and not Path(interactions_log).parent.name:
+        interactions_log = str(out_dir / interactions_log)
+
     agents = build_agents(
         args.agents.split(","),
         seed=args.seed,
         max_metric_calls=args.max_metric_calls,
         reflection_lm=args.reflection_lm,
-        interactions_log=args.interactions_log,
+        interactions_log=interactions_log,
     )
 
     # Train any GEPA agents before benchmarking

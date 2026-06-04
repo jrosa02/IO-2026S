@@ -40,6 +40,191 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Null logger — silences GEPA's internal verbose output
+# ---------------------------------------------------------------------------
+
+class _NullLogger:
+    def log(self, msg: str) -> None:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Progress callback — prints clean ASCII blocks per iteration
+# ---------------------------------------------------------------------------
+
+class GEPAProgressCallback:
+    """Prints an ASCII block per GEPA iteration summarising the outcome."""
+
+    _W = 66
+
+    def __init__(self, adapter: "HyperparamAdapter", max_metric_calls: int) -> None:
+        self._adapter = adapter
+        self._max_calls = max_metric_calls
+        self._calls_used: int = 0
+        self._iter_hist_start: int = 0
+        self._pending_valset: dict | None = None
+        self._best_score: float = -1.0
+        self._best_iter: int = 0
+        self._best_config_params: dict = {}
+
+    # ------------------------------------------------------------------
+    # Formatting helpers
+    # ------------------------------------------------------------------
+
+    def _bar(self, title: str = "") -> str:
+        if title:
+            prefix = f"=== {title}  "
+            return prefix + "=" * max(0, self._W - len(prefix))
+        return "=" * self._W
+
+    @staticmethod
+    def _fmt_config(params: dict) -> str:
+        return "  ".join(f"{k}={v}" for k, v in params.items())
+
+    @staticmethod
+    def _fmt_quality(quality_scores: list[float]) -> str:
+        pcts = "  ".join(f"{q * 100:.1f}%" for q in quality_scores)
+        mean = sum(quality_scores) / len(quality_scores) * 100 if quality_scores else 0.0
+        return f"[{pcts}]  mean={mean:.1f}%"
+
+    @staticmethod
+    def _fmt_valset(scores_by_val_id: dict, avg: float) -> str:
+        per = "  ".join(f"{v:.3f}" for v in scores_by_val_id.values())
+        return f"composite avg {avg:.3f}  [{per}]"
+
+    def _budget(self) -> str:
+        return f"{self._calls_used} / {self._max_calls}"
+
+    # ------------------------------------------------------------------
+    # Callbacks
+    # ------------------------------------------------------------------
+
+    def on_optimization_start(self, event: dict) -> None:
+        print(self._bar("GEPA OPTIMIZATION START"))
+        print(f"  Budget  : {self._max_calls} metric calls")
+        print(self._bar())
+        print()
+
+    def on_budget_updated(self, event: dict) -> None:
+        self._calls_used = event["metric_calls_used"]
+
+    def on_iteration_start(self, event: dict) -> None:
+        self._iter_hist_start = len(self._adapter.history_)
+        self._pending_valset = None
+
+    def on_valset_evaluated(self, event: dict) -> None:
+        iteration = event["iteration"]
+        scores = event["scores_by_val_id"]
+        avg = event["average_score"]
+        is_best = event["is_best_program"]
+
+        if iteration == 0:
+            history = self._adapter.history_
+            h = history[0] if history else {}
+            config_params = h.get("config_params", {})
+            quality_scores = h.get("quality_scores", [])
+            print(self._bar("Iter 0  SEED"))
+            print(f"  Config  : {self._fmt_config(config_params)}")
+            if quality_scores:
+                print(f"  Quality : improv%  {self._fmt_quality(quality_scores)}")
+            print(f"  Valset  : {self._fmt_valset(scores, avg)}")
+            print(f"  Calls   : {self._budget()}")
+            print(self._bar())
+            print()
+            self._best_score = avg
+            self._best_iter = 0
+            self._best_config_params = config_params
+            return
+
+        self._pending_valset = {"scores_by_val_id": scores, "average_score": avg, "is_best_program": is_best}
+        if is_best:
+            self._best_score = avg
+            self._best_iter = iteration
+            history = self._adapter.history_
+            if history:
+                self._best_config_params = history[-1]["config_params"]
+
+    def on_evaluation_skipped(self, event: dict) -> None:
+        iteration = event["iteration"]
+        reason = event["reason"]
+        print(self._bar(f"Iter {iteration}  SKIPPED"))
+        print(f"  Reason  : {reason}")
+        print(f"  Calls   : {self._budget()}")
+        print(self._bar())
+        print()
+
+    def on_candidate_accepted(self, event: dict) -> None:
+        iteration = event["iteration"]
+        history = self._adapter.history_
+        s = self._iter_hist_start
+
+        h_curr = history[s]     if s < len(history) else {}
+        h_sub  = history[s + 1] if s + 1 < len(history) else {}
+        h_val  = history[s + 2] if s + 2 < len(history) else (history[-1] if history else {})
+
+        config_params   = h_val.get("config_params", {})
+        quality_scores  = h_val.get("quality_scores", [])
+        elapsed         = h_val.get("mean_elapsed_s", 0.0)
+        score_before    = h_curr.get("mean_score", 0.0)
+        score_after     = h_sub.get("mean_score", 0.0)
+        delta           = score_after - score_before
+        sign            = "+" if delta >= 0 else ""
+
+        pv        = self._pending_valset or {}
+        is_best   = pv.get("is_best_program", False)
+        val_ids   = pv.get("scores_by_val_id", {})
+        val_avg   = pv.get("average_score", 0.0)
+
+        best_tag = "  [*** NEW BEST ***]" if is_best else ""
+        print(self._bar(f"Iter {iteration}  ACCEPTED{best_tag}"))
+        print(f"  Config  : {self._fmt_config(config_params)}")
+        print(f"  Subsamp : composite  {score_before:.3f} -> {score_after:.3f}  ({sign}{delta:.3f})")
+        if quality_scores:
+            print(f"  Quality : improv%  {self._fmt_quality(quality_scores)}")
+        print(f"  Valset  : {self._fmt_valset(val_ids, val_avg)}")
+        print(f"  Time    : {elapsed:.2f} s/run   Calls: {self._budget()}")
+        print(self._bar())
+        print()
+
+    def on_candidate_rejected(self, event: dict) -> None:
+        iteration = event["iteration"]
+        history   = self._adapter.history_
+        s         = self._iter_hist_start
+
+        h_curr = history[s]     if s < len(history) else {}
+        h_sub  = history[s + 1] if s + 1 < len(history) else (history[-1] if history else {})
+
+        config_params  = h_sub.get("config_params", {})
+        quality_scores = h_sub.get("quality_scores", [])
+        elapsed        = h_sub.get("mean_elapsed_s", 0.0)
+        score_before   = h_curr.get("mean_score", 0.0)
+        score_after    = h_sub.get("mean_score", 0.0)
+        delta          = score_after - score_before
+        sign           = "+" if delta >= 0 else ""
+
+        print(self._bar(f"Iter {iteration}  REJECTED"))
+        print(f"  Config  : {self._fmt_config(config_params)}")
+        print(f"  Subsamp : composite  {score_before:.3f} -> {score_after:.3f}  ({sign}{delta:.3f})  [worse]")
+        if quality_scores:
+            print(f"  Quality : improv%  {self._fmt_quality(quality_scores)}")
+        print(f"  Time    : {elapsed:.2f} s/run   Calls: {self._budget()}")
+        print(self._bar())
+        print()
+
+    def on_optimization_end(self, event: dict) -> None:
+        total_iter  = event["total_iterations"]
+        total_calls = event["total_metric_calls"]
+        print(self._bar("DONE"))
+        print(f"  Iterations  : {total_iter}   Metric calls: {total_calls} / {self._max_calls}")
+        print(f"  Best score  : {self._best_score:.3f}  (iter {self._best_iter})")
+        if self._best_config_params:
+            print(f"  Best config : {self._fmt_config(self._best_config_params)}")
+        print(self._bar())
+        print()
+
+
 def _load_prompt(name: str) -> str:
     path = Path(__file__).parent.parent / "prompts" / name
     if path.exists():
@@ -275,6 +460,7 @@ class GEPAAgent(Agent):
             seed=self.seed,
         )
 
+        progress_cb = GEPAProgressCallback(adapter, max_metric_calls=self.max_metric_calls)
         interactions: list[dict[str, Any]] = []
 
         def _log_interaction(
@@ -306,6 +492,8 @@ class GEPAAgent(Agent):
                 reflection_prompt_template=self.reflection_prompt,
                 max_metric_calls=self.max_metric_calls,
                 seed=self.seed or 0,
+                logger=_NullLogger(),
+                callbacks=[progress_cb],
             )
         finally:
             if self.interactions_log is not None:
