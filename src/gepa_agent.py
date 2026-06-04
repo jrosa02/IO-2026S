@@ -123,6 +123,8 @@ class GEPAProgressCallback:
         if iteration == 0:
             history = self._adapter.history_
             h = history[0] if history else {}
+            if history:
+                history[0]["status"] = "SEED"
             config_params = h.get("config_params", {})
             quality_scores = h.get("quality_scores", [])
             print(self._bar("Iter 0  SEED"))
@@ -164,6 +166,15 @@ class GEPAProgressCallback:
         h_sub  = history[s + 1] if s + 1 < len(history) else {}
         h_val  = history[s + 2] if s + 2 < len(history) else (history[-1] if history else {})
 
+        pv_is_best = (self._pending_valset or {}).get("is_best_program", False)
+        status = "BEST" if pv_is_best else "accepted"
+        if h_curr:
+            h_curr["status"] = "re-eval"
+        if h_sub:
+            h_sub["status"] = status
+        if h_val and h_val is not h_sub:
+            h_val["status"] = status
+
         config_params   = h_val.get("config_params", {})
         quality_scores  = h_val.get("quality_scores", [])
         elapsed         = h_val.get("mean_elapsed_s", 0.0)
@@ -180,7 +191,7 @@ class GEPAProgressCallback:
         best_tag = "  [*** NEW BEST ***]" if is_best else ""
         print(self._bar(f"Iter {iteration}  ACCEPTED{best_tag}"))
         print(f"  Config  : {self._fmt_config(config_params)}")
-        print(f"  Subsamp : composite  {score_before:.3f} -> {score_after:.3f}  ({sign}{delta:.3f})")
+        print(f"▶ SCORE  : {score_after:.3f}  (Δ{sign}{delta:.3f} vs curr-prog same batch)  [GEPA optimises this]")
         if quality_scores:
             print(f"  Quality : improv%  {self._fmt_quality(quality_scores)}")
         print(f"  Valset  : {self._fmt_valset(val_ids, val_avg)}")
@@ -196,6 +207,11 @@ class GEPAProgressCallback:
         h_curr = history[s]     if s < len(history) else {}
         h_sub  = history[s + 1] if s + 1 < len(history) else (history[-1] if history else {})
 
+        if h_curr:
+            h_curr["status"] = "re-eval"
+        if h_sub:
+            h_sub["status"] = "rejected"
+
         config_params  = h_sub.get("config_params", {})
         quality_scores = h_sub.get("quality_scores", [])
         elapsed        = h_sub.get("mean_elapsed_s", 0.0)
@@ -206,7 +222,7 @@ class GEPAProgressCallback:
 
         print(self._bar(f"Iter {iteration}  REJECTED"))
         print(f"  Config  : {self._fmt_config(config_params)}")
-        print(f"  Subsamp : composite  {score_before:.3f} -> {score_after:.3f}  ({sign}{delta:.3f})  [worse]")
+        print(f"▶ SCORE  : {score_after:.3f}  (Δ{sign}{delta:.3f} vs curr-prog same batch)  [worse — GEPA rejected]")
         if quality_scores:
             print(f"  Quality : improv%  {self._fmt_quality(quality_scores)}")
         print(f"  Time    : {elapsed:.2f} s/run   Calls: {self._budget()}")

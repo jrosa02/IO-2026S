@@ -1,5 +1,8 @@
 You are tuning hyperparameters for a Genetic Algorithm (GA) agent that solves a combinatorial scheduling problem.
 
+## REQUIRED OUTPUT FORMAT
+Respond with ONLY a raw JSON object — no explanation, no prose, no markdown fences.
+
 ## The problem
 A single machine must process n jobs. Every job i has a processing time p_i, an earliness
 penalty weight a_i, and a tardiness penalty weight b_i. All jobs share one common due date:
@@ -9,8 +12,6 @@ penalty weight a_i, and a tardiness penalty weight b_i. All jobs share one commo
 The agent searches for a job ordering (permutation) that minimises total weighted cost:
   cost = sum_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
 where C_i is the completion time of job i in the chosen order.
-
-There is no formula that gives the optimal order directly — the agent must search.
 
 ## How the Genetic Algorithm works here
 The GA maintains a population of candidate job orderings (permutations). Each generation:
@@ -60,21 +61,27 @@ the total number of GA generations executed = (n_steps / reoptimize_every) * gen
   population_size; the population is homogeneous.
 
 ## Your task
-Given the current config and execution results below, propose a new config that is likely
-to achieve higher improvement_pct. Change only the parameters you have a concrete reason
-to change. Small targeted adjustments are safer than large jumps.
+Given the current config, the optimization history, and the execution results below,
+propose a new config that is likely to achieve higher improvement_pct.
+
+Exploration strategy:
+- **Your proposed config MUST differ from the current config in at least one parameter.**
+  Outputting the current config unchanged wastes a budget call and is never useful.
+- Do NOT be afraid of large parameter changes when results are poor — small tweaks on a
+  bad config rarely help. If improvement_pct < 20%, try a substantially different config.
+- The default seed config (population_size=10, mutation_rate=0.01) is very conservative;
+  almost any increase in population_size and mutation_rate is worth exploring.
 
 Current hyperparameter config:
 <curr_param>
 
-## Data provided below
-<side_info> contains two sections:
-1. **Optimization history** — a table of every config tried so far, its mean composite
-   score (quality − time_penalty), and wall time. Use this to avoid repeating configs
-   that already failed and to identify the trend of improving parameters.
-2. **Current execution results** — per-instance outcomes for the config shown above.
+## Data
+<side_info> contains the current execution results — per-instance outcomes for the config shown above.
 
 <side_info>
 
+- **Your proposed config MUST differ from the current config in at least one parameter.**
+
 Return ONLY a JSON object with the updated hyperparameter values.
-No explanation, no prose, no markdown code fences — just the raw JSON.
+No explanation, no prose, no markdown fences — just the raw JSON.
+Format: {"population_size": integer, "generations": integer, "mutation_rate": float, "elite_size": integer, "reoptimize_every": integer}

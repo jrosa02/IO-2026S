@@ -135,6 +135,7 @@ class SchedulingGEPAAdapter:
         )
         self.history_.append({
             "call_idx": self._call_idx,
+            "status": "",  # filled in by GEPAProgressCallback once accept/reject is known
             "config_params": {k: v for k, v in vars(config).items() if not k.startswith("_")},
             "scores": scores,
             "mean_score": mean_score,
@@ -171,9 +172,6 @@ class SchedulingGEPAAdapter:
 
         records: list[dict] = []
 
-        if self.history_:
-            records.append({"Optimization history (all previous calls)": self._format_history_summary()})
-
         for result in eval_batch.trajectories:
             records.append(
                 {
@@ -192,15 +190,16 @@ class SchedulingGEPAAdapter:
 
     def _format_history_summary(self) -> str:
         """Format self.history_ as a compact table for LLM injection."""
-        lines = ["call | mean_score | time_s | params"]
-        lines.append("-----|------------|--------|-------")
+        lines = ["call | result   | score  | time_s | params"]
+        lines.append("-----|----------|--------|--------|-------")
         for entry in self.history_:
             params_str = ", ".join(
                 f"{k}={v}" for k, v in entry["config_params"].items()
             )
             lines.append(
                 f"{entry['call_idx']:4d} | "
-                f"{entry['mean_score']:10.3f} | "
+                f"{entry.get('status', ''):8s} | "
+                f"{entry['mean_score']:6.3f} | "
                 f"{entry.get('mean_elapsed_s', 0.0):6.2f} | "
                 f"{params_str}"
             )

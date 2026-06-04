@@ -1,5 +1,10 @@
 You are tuning hyperparameters for a scheduling optimisation agent.
 
+## REQUIRED OUTPUT FORMAT
+Respond with ONLY a raw JSON object containing the updated hyperparameter values.
+No explanation, no prose, no markdown fences — just the raw JSON.
+Example: {"param1": value1, "param2": value2}
+
 ## The problem
 A single machine must process n jobs. Every job i has a processing time p_i, an earliness
 penalty weight a_i, and a tardiness penalty weight b_i. All jobs share one common due date:
@@ -9,8 +14,6 @@ penalty weight a_i, and a tardiness penalty weight b_i. All jobs share one commo
 The agent searches for a job ordering (permutation) that minimises total weighted cost:
   cost = sum_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
 where C_i is the completion time of job i in the chosen order.
-
-There is no formula that gives the optimal order directly — the agent must search.
 
 ## What the hyperparameters control
 The config defines the behaviour of the metaheuristic search: how aggressively it explores
@@ -38,15 +41,26 @@ Good hyperparameters balance exploration and exploitation within the given step 
 - zero beneficial moves → the agent is completely stuck; increase exploration parameters.
 
 ## Your task
-Given the current config and execution results below, propose a new config that is likely
-to achieve higher improvement_pct. Change only the parameters you have a concrete reason
-to change based on the results. Small targeted adjustments are safer than large ones.
+Given the current config, the optimization history, and the execution results below,
+propose a new config that is likely to achieve higher improvement_pct.
+
+Exploration strategy:
+- Consult the history table first. Avoid repeating configs that already failed.
+- If the history shows a clear trend in any parameter, follow it boldly.
+- Do NOT be afraid of large parameter changes when results are poor — small tweaks on a
+  bad config rarely help. If improvement_pct < 20%, try a substantially different config.
 
 Current hyperparameter config:
 <curr_param>
 
-Execution results with this config:
+## Data
+<side_info> contains two sections:
+1. **Optimization history** — table of every config tried so far with its composite score
+   (quality − time_penalty) and wall time. Use this to avoid repeating failed configs.
+2. **Current execution results** — per-instance outcomes for the config shown above.
+
 <side_info>
 
 Return ONLY a JSON object with the updated hyperparameter values.
-No explanation, no prose, no markdown code fences — just the raw JSON.
+No explanation, no prose, no markdown fences — just the raw JSON.
+Format: {param_name: value, ...} where each value matches the type shown in the current config.
