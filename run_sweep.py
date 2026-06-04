@@ -12,6 +12,7 @@ Usage:
 import subprocess
 import sys
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 from ollama import Client
@@ -52,13 +53,30 @@ def check_model(model_str: str) -> bool:
         return False
 
 
-def run_experiment(model: str) -> bool:
-    """Invoke main.py for *model*; return True on success (exit code 0)."""
+def run_experiment(model: str) -> tuple[bool, Path]:
+    """Invoke main.py for *model*, tee output to a log file; return (success, log_path)."""
+    short = model.removeprefix("ollama/").replace(":", "_").replace("/", "_")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = _HERE / "results"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"sweep_{short}_{ts}.log"
+
     argv = [sys.executable, "main.py", "--reflection-lm", model]
     for flag, value in BASE_ARGS.items():
         argv += [flag, value]
-    result = subprocess.run(argv, cwd=_HERE)
-    return result.returncode == 0
+
+    with log_path.open("w") as log_fh:
+        proc = subprocess.Popen(
+            argv, cwd=_HERE,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+        for line in proc.stdout or []:
+            sys.stdout.write(line)
+            log_fh.write(line)
+        proc.wait()
+
+    return proc.returncode == 0, log_path
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +120,8 @@ def main() -> None:
         print(f" Running: {short}")
         print("=" * W)
         try:
-            ok = run_experiment(model)
-            status = "OK" if ok else f"FAILED (exit {1})"
+            ok, log_path = run_experiment(model)
+            status = f"OK  -> {log_path.name}" if ok else f"FAILED  -> {log_path.name}"
         except Exception:
             traceback.print_exc()
             status = "FAILED (exception)"
