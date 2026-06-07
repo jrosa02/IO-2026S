@@ -40,8 +40,20 @@ from .sch_env import EpisodeResult, SchEnv
 
 
 class SimulatedAnnealingAgent(Agent):
+    """Scheduling agent that uses simulated annealing to optimise a job permutation."""
 
-    def __init__(self, cfg: SAConfig = SAConfig()):
+    def __init__(self, cfg: SAConfig | None = None) -> None:
+        """
+        Initialise the SA agent with the given config.
+
+        Parameters
+        ----------
+        cfg : SAConfig | None
+            Hyperparameter config.  Defaults to ``SAConfig()`` if not provided.
+
+        """
+        if cfg is None:
+            cfg = SAConfig()
         self.cfg = cfg
         self._np_rng = np.random.default_rng()
 
@@ -56,7 +68,15 @@ class SimulatedAnnealingAgent(Agent):
         plt.savefig(self.cfg.temp_plot_file, dpi=150, bbox_inches='tight')
         plt.close()
 
-    def solve(self, env: SchEnv, *, seed: int | None = None):
+    def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
+        """
+        Run simulated annealing on *env* and return the episode result.
+
+        Returns
+        -------
+        EpisodeResult
+
+        """
         if seed is not None:
             self._np_rng = np.random.default_rng(seed)
 
@@ -71,8 +91,8 @@ class SimulatedAnnealingAgent(Agent):
         inst = env.instance
         d = int(inst.sum_p * env.h)
         p, a, b = inst.p_array, inst.a_array, inst.b_array
-        _I = np.empty(4, dtype=np.int64)
-        _J = np.empty(4, dtype=np.int64)
+        buf_I = np.empty(4, dtype=np.int64)
+        buf_J = np.empty(4, dtype=np.int64)
 
         for step in range(env.max_steps):
             T = (self.cfg.T0 * math.exp(-step * self.cfg.b) +
@@ -84,13 +104,13 @@ class SimulatedAnnealingAgent(Agent):
             while True:
                 acts = env.action_space_samples(looping)
                 for k in range(4):
-                    _I[k], _J[k] = env.decode_action(acts[k])
-                costs = _evaluate_batch_swap(p, a, b, env._schedule, d, _I, _J)
+                    buf_I[k], buf_J[k] = env.decode_action(acts[k])
+                costs = _evaluate_batch_swap(p, a, b, env._schedule, d, buf_I, buf_J)
                 for k in range(4):
                     delta = int(costs[k]) - current_cost
                     if delta < 0 or self._np_rng.random() < math.exp(-delta / T):
                         action = acts[k]
-                        i, j = int(_I[k]), int(_J[k])
+                        i, j = int(buf_I[k]), int(buf_J[k])
                         break
                 else:
                     continue
@@ -102,11 +122,9 @@ class SimulatedAnnealingAgent(Agent):
             self.actions.append((i, j))
             self.cost_history.append(env.best_cost)
 
-        # self._plot_temperature_schedule(temperatures)
-
         best_cost = env.best_cost
         n_improvements = sum(
-            1 for a, b in zip(self.cost_history, self.cost_history[1:]) if b < a
+            1 for prev, curr in zip(self.cost_history, self.cost_history[1:]) if curr < prev
         )
         return EpisodeResult(
             instance_index=env.instance.index,
@@ -130,11 +148,30 @@ class SimulatedAnnealingAgent(Agent):
 class GeneticAlgorithmAgent(Agent):
     """Online GA that takes one action per step until max_steps is reached."""
 
-    def __init__(self, cfg: GAConfig = GAConfig()):
+    def __init__(self, cfg: GAConfig | None = None) -> None:
+        """
+        Initialise the GA agent with the given config.
+
+        Parameters
+        ----------
+        cfg : GAConfig | None
+            Hyperparameter config.  Defaults to ``GAConfig()`` if not provided.
+
+        """
+        if cfg is None:
+            cfg = GAConfig()
         self.cfg = cfg
         self._np_rng = np.random.default_rng()
 
-    def solve(self, env: SchEnv, *, seed: int | None = None):
+    def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
+        """
+        Run the genetic algorithm on *env* and return the episode result.
+
+        Returns
+        -------
+        EpisodeResult
+
+        """
         if seed is not None:
             self._np_rng = np.random.default_rng(seed)
 
@@ -250,9 +287,11 @@ class GeneticAlgorithmAgent(Agent):
         # Build EpisodeResult
         # ------------------------------------------------------------------
         n_improvements = sum(
-            1 for a, b in zip(self.cost_history, self.cost_history[1:]) if b < a
+            1 for prev, curr in zip(self.cost_history, self.cost_history[1:]) if curr < prev
         )
-        improvement_pct = (100.0 * (initial_cost - best_cost_so_far) / initial_cost) if initial_cost > 0 else 0.0
+        improvement_pct = (
+            (100.0 * (initial_cost - best_cost_so_far) / initial_cost) if initial_cost > 0 else 0.0
+        )
 
         return EpisodeResult(
             instance_index=env.instance.index,

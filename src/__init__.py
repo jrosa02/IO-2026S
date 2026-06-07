@@ -1,10 +1,9 @@
 """
-io-2026s: Common due date scheduling with Reinforcement Learning (PPO agent)
+io-2026s: Common due date scheduling with Reinforcement Learning.
 
 Main exports for easy importing:
   - SchInstance, SchJob, SchDataset: Scheduling problem instances
   - SchEnv: Gym-like scheduling environment
-  - PPOAgent, PPOConfig, train, evaluate: RL training and evaluation
   - run_episode: Batch episode runner
 """
 
@@ -15,47 +14,25 @@ from .orlib_sch import SchDataset, SchInstance, SchJob, load
 from .sch_env import EpisodeResult, SchEnv, run_episode
 from .visualize import plot_gepa_history
 
-# RL components (from sch_rl.py) are not yet available
-# from .sch_rl import (
-#     PPOAgent,
-#     PPOConfig,
-#     RolloutBuffer,
-#     ActorCritic,
-#     train,
-#     evaluate,
-#     evaluate_batch,
-#     benchmark,
-#     TrainLog,
-# )
-
 __version__ = "0.1.0"
 __all__ = [
-    # Data structures
+    "Agent",
+    "AgentBenchmarkResult",
+    "BenchmarkRunner",
+    "EpisodeResult",
+    "GAConfig",
+    "GeneticAlgorithmAgent",
+    "GreedyAgent",
+    "RandomAgent",
+    "SAConfig",
+    "SchDataset",
+    "SchEnv",
     "SchInstance",
     "SchJob",
-    "SchDataset",
-    # Environment
-    "SchEnv",
-    "EpisodeResult",
-    "run_episode",
-    # Loaders
-    "load",
-    # Agents
-    "Agent",
-    "RandomAgent",
-    "GreedyAgent",
     "SimulatedAnnealingAgent",
-    "SAConfig",
-    "GeneticAlgorithmAgent",
-    "GAConfig",
-    # Benchmark
-    "BenchmarkRunner",
-    "AgentBenchmarkResult",
-    # Visualisation
+    "load",
     "plot_gepa_history",
-    # RL components from sch_rl.py (not yet available)
-    # "PPOAgent", "PPOConfig", "ActorCritic", "RolloutBuffer", "TrainLog",
-    # "train", "evaluate", "evaluate_batch", "benchmark",
+    "run_episode",
 ]
 
 

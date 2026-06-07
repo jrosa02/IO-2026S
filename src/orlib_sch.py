@@ -1,6 +1,6 @@
 """
-orlib_sch.py - Loader for ORLib Common Due Date Scheduling instances
-====================================================================
+orlib_sch.py — Loader for ORLib Common Due Date Scheduling instances.
+
 Parses the ``sch`` family of files from:
     https://people.brunel.ac.uk/~mastjjb/jeb/orlib/files/
     (sch10, sch20, sch50, sch100, sch200, sch500, sch1000)
@@ -8,23 +8,24 @@ Parses the ``sch`` family of files from:
 Problem definition
 ------------------
 Single-machine scheduling with a *common* due date d.
-Each job i has:
-    p(i)  - deterministic processing time
-    a(i)  - earliness penalty weight  (cost per unit early)
-    b(i)  - tardiness penalty weight  (cost per unit late)
+Each job i has ``p(i)`` (processing time), ``a(i)`` (earliness penalty weight),
+and ``b(i)`` (tardiness penalty weight).
 
-The common due date is parameterised by a tightness factor h:
-    d(h) = floor(SUM_P * h),   h ∈ {0.2, 0.4, 0.6, 0.8}
+The common due date is parameterised by a tightness factor h::
 
-The objective is to minimise:
+    d(h) = floor(SUM_P * h),   h in {0.2, 0.4, 0.6, 0.8}
+
+The objective is to minimise::
+
     sum_i [ a(i) * max(0, d - C(i))  +  b(i) * max(0, C(i) - d) ]
-where C(i) is the completion time of job i.
 
-File format
------------
+where ``C(i)`` is the completion time of job i.
+
+File format::
+
     <number_of_problems>
     for each problem:
-        <n>                      ← number of jobs
+        <n>                      # number of jobs
         <p_1> <a_1> <b_1>
         <p_2> <a_2> <b_2>
         ...
@@ -32,10 +33,10 @@ File format
 
 Public API
 ----------
-    load(source)          → SchDataset
-    SchDataset            - iterable collection of SchInstance
-    SchInstance           - one benchmark instance (see attributes below)
-    SchJob                - named tuple: (p, a, b)
+- ``load(source)`` → SchDataset
+- ``SchDataset`` — iterable collection of SchInstance
+- ``SchInstance`` — one benchmark instance (see attributes below)
+- ``SchJob`` — named tuple: (p, a, b)
 
 Quick start
 -----------
@@ -88,6 +89,14 @@ class SchJob(NamedTuple):
     b: int  # tardiness penalty weight
 
     def __repr__(self) -> str:
+        """
+        Return a detailed string representation of the job.
+
+        Returns
+        -------
+        str
+
+        """
         return f"SchJob(p={self.p}, a={self.a}, b={self.b})"
 
 
@@ -115,6 +124,15 @@ class SchInstance:
     sum_p: int = field(init=False)
 
     def __post_init__(self) -> None:
+        """
+        Validate job count and precompute derived numpy arrays.
+
+        Raises
+        ------
+        ValueError
+            If the number of jobs does not match the declared *n*.
+
+        """
         if len(self.jobs) != self.n:
             raise ValueError(f"Instance {self.index}: declared n={self.n} but got {len(self.jobs)} jobs.")
         self.sum_p = sum(j.p for j in self.jobs)
@@ -135,7 +153,17 @@ class SchInstance:
         Parameters
         ----------
         h : float
-            Due-date tightness.  h=0 → all jobs tardy; h=1 → all jobs early.
+            Due-date tightness.  h=0 means all jobs tardy; h=1 means all jobs early.
+
+        Returns
+        -------
+        int
+            The common due date ``floor(sum_p * h)``.
+
+        Raises
+        ------
+        ValueError
+            If *h* is outside ``[0, 1]``.
 
         """
         if not 0.0 <= h <= 1.0:
@@ -160,7 +188,7 @@ class SchInstance:
         Returns
         -------
         int
-            Total penalty  Σ_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
+            Total penalty  sum_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
 
         """
         d = int(self.sum_p * h)
@@ -175,18 +203,21 @@ class SchInstance:
         """
         Return a JSON-serialisable dictionary.
 
-        Schema
-        ------
-        {
-          "index":  int,
-          "n":      int,
-          "sum_p":  int,
-          "due_dates": {"0.2": int, "0.4": int, "0.6": int, "0.8": int},
-          "jobs": [
-            {"p": int, "a": int, "b": int},
-            ...
-          ]
-        }
+        Schema::
+
+            {
+              "index":  int,
+              "n":      int,
+              "sum_p":  int,
+              "due_dates": {"0.2": int, "0.4": int, "0.6": int, "0.8": int},
+              "jobs": [{"p": int, "a": int, "b": int}, ...]
+            }
+
+        Returns
+        -------
+        dict
+            JSON-serialisable representation of the instance.
+
         """
         return {
             "index": self.index,
@@ -201,11 +232,27 @@ class SchInstance:
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
+        """
+        Return a concise one-line summary of the instance.
+
+        Returns
+        -------
+        str
+
+        """
         due = {h: self.due_date(h) for h in (0.2, 0.4, 0.6, 0.8)}
         return f"SchInstance(index={self.index}, n={self.n}, sum_p={self.sum_p}, due_dates={due})"
 
     def summary(self) -> str:
-        """Multi-line human-readable summary."""
+        """
+        Multi-line human-readable summary.
+
+        Returns
+        -------
+        str
+            A formatted text block with job counts, due dates, and per-job details.
+
+        """
         lines = [
             f"Instance #{self.index}",
             f"  Jobs (n)    : {self.n}",
@@ -241,12 +288,36 @@ class SchDataset:
     # ------------------------------------------------------------------
 
     def __len__(self) -> int:
+        """
+        Return the number of instances in the dataset.
+
+        Returns
+        -------
+        int
+
+        """
         return len(self.instances)
 
     def __iter__(self) -> Iterator[SchInstance]:
+        """
+        Iterate over all instances.
+
+        Returns
+        -------
+        Iterator[SchInstance]
+
+        """
         return iter(self.instances)
 
     def __getitem__(self, key: int) -> SchInstance:
+        """
+        Return the instance at the given index.
+
+        Returns
+        -------
+        SchInstance
+
+        """
         return self.instances[key]
 
     # ------------------------------------------------------------------
@@ -254,7 +325,14 @@ class SchDataset:
     # ------------------------------------------------------------------
 
     def to_dict(self) -> dict:
-        """Return a JSON-serialisable dict for the whole dataset."""
+        """
+        Return a JSON-serialisable dict for the whole dataset.
+
+        Returns
+        -------
+        dict
+
+        """
         return {
             "source": self.source,
             "n_instances": len(self.instances),
@@ -262,7 +340,15 @@ class SchDataset:
         }
 
     def to_json(self, **kwargs) -> str:
-        """Serialise to a JSON string.  Extra kwargs are passed to json.dumps."""
+        """
+        Serialise to a JSON string.  Extra kwargs are passed to json.dumps.
+
+        Returns
+        -------
+        str
+            JSON-encoded dataset string.
+
+        """
         kwargs.setdefault("indent", 2)
         return json.dumps(self.to_dict(), **kwargs)
 
@@ -275,6 +361,14 @@ class SchDataset:
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
+        """
+        Return a concise string representation of the dataset.
+
+        Returns
+        -------
+        str
+
+        """
         return f"SchDataset(source={self.source!r}, n_instances={len(self.instances)})"
 
 
@@ -284,13 +378,27 @@ class SchDataset:
 
 
 def _token_stream(text: str) -> Iterator[str]:
-    """Yield all whitespace-separated tokens from *text*, skipping blank lines."""
+    """
+    Yield all whitespace-separated tokens from *text*, skipping blank lines.
+
+    Yields
+    ------
+    str
+        Each whitespace-separated token in order.
+
+    """
     yield from text.split()
 
 
 def _parse(text: str, source: str) -> SchDataset:
     """
     Core parser.  Raises ``ValueError`` on malformed input.
+
+    Returns
+    -------
+    SchDataset
+        The parsed dataset.
+
     """
     tokens = list(_token_stream(text))
     pos = 0
@@ -347,6 +455,11 @@ def load(source: str | Path) -> SchDataset:
     Returns
     -------
     SchDataset
+
+    Raises
+    ------
+    FileNotFoundError
+        If *source* is a local file path that does not exist.
 
     Examples
     --------

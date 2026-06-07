@@ -83,7 +83,7 @@ def test_run_episode(env):
 
 def test_multiple_instances(dataset):
     """Check that env works with multiple instances."""
-    for i, instance in enumerate(dataset.instances[:3]):
+    for _i, instance in enumerate(dataset.instances[:3]):
         env = SchEnv(instance, h=0.4, max_steps=10, seed=42)
         obs, info = env.reset()
         assert obs is not None

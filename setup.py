@@ -7,14 +7,14 @@ from setuptools.command.build_ext import build_ext as _build_ext
 
 
 class build_ext(_build_ext):
-    """Custom build_ext that places compiled .so files in src/native_optimized/_compiled"""
+    """Custom build_ext that places compiled .so files in src/native_optimized/_compiled."""
 
     def build_extension(self, ext):
-        """Override to capture and display pragma messages during compilation"""
+        """Override to capture and display pragma messages during compilation."""
         # Temporarily capture compiler output to display pragma messages
 
         # Get the compiler command that would be used
-        sources = self.sources if hasattr(self, 'sources') else ext.sources
+        self.sources if hasattr(self, 'sources') else ext.sources
 
         print(f"\n{'=' * 70}")
         print(f"Compiling {ext.name}...")
@@ -36,7 +36,7 @@ class build_ext(_build_ext):
 
         # Copy from build output to _compiled and remove from src/
         src_dir = Path(__file__).parent / "src"
-        for root, dirs, files in Path(self.build_lib).walk():
+        for root, _dirs, files in Path(self.build_lib).walk():
             for file in files:
                 if file.endswith('.so'):
                     src = Path(root) / file

@@ -1,7 +1,7 @@
 [project]
 name = "io-2026s"
 version = "0.1.0"
-description = "Common due date scheduling with RL (PPO agent)"
+description = "Common due date scheduling with RL"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -54,6 +54,20 @@ ignore = [
     "ISC001",  # implicit string concat
     "D203",    # one-blank-line-before-class (conflicts with D211)
     "D212",    # multi-line-summary-first-line (conflicts with D213)
+    # Complexity rules — require major refactoring, not documentation
+    "PLR0912", # too many branches
+    "PLR0913", # too many arguments
+    "PLR0914", # too many local variables
+    "PLR0915", # too many statements
+    "PLR0917", # too many positional args
+    "PLR2004", # magic value comparisons
+    "PLR6301", # method could be static — template methods intentional
+    # Minor style, not worth enforcing
+    "B024",    # abstract class with no abstract methods — Agent uses NotImplementedError pattern
+    "B905",    # zip() without strict=
+    "C408",    # dict() call instead of literal
+    "RUF046",  # unnecessary cast
+    "RUF059",  # unused unpacked variable
 ]
 
 fixable = ["ALL"]
@@ -81,10 +95,22 @@ url = "https://pypi.org/simple/"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
-    "S101",  # allow assert
-    "PLR2004",  # magic values allowed in tests
-    "D",  # ignore docstring rules in tests
+    "S101",    # allow assert
+    "PLR2004", # magic values allowed in tests
+    "D",       # ignore docstring rules in tests
 ]
+"src/__init__.py" = [
+    "RUF067",  # __init__ should only re-export — main() entry point intentional
+    "PLC0415", # import not at top-level — lazy CLI import intentional
+]
+"src/native_optimized/__init__.py" = [
+    "RUF067",  # __init__ is a loader module, not a pure re-export shim
+]
+# Utility scripts: not held to the same standard as src/
+"generate_uml.py" = ["D", "DOC", "PLR"]
+"md_to_pdf.py" = ["D", "DOC", "RUF001", "RUF002", "RUF003", "PLC0415", "RET504"]
+"render_interactions.py" = ["D", "DOC", "PLR"]
+"run_sweep.py" = ["D", "DOC"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
@@ -100,6 +126,8 @@ line-ending = "auto"
 
 [dependency-groups]
 dev = [
+    "furo>=2025.12.19",
     "pytest>=7.0",
     "ruff>=0.15.2",
+    "sphinx>=7.3.7",
 ]

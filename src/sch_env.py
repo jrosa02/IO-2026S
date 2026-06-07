@@ -1,6 +1,6 @@
 """
-sch_env.py — Scheduling Environment (modify → evaluate loop)
-=============================================================
+sch_env.py — Scheduling Environment (modify and evaluate loop).
+
 Wraps a :class:`~orlib_sch.SchInstance` as a self-contained Gym-style
 environment whose *action space* is the set of pairwise-swap moves on a
 job permutation.
@@ -24,19 +24,24 @@ Episode
     Runs for ``max_steps`` steps (default: 10 * n).
     Terminates early only if ``max_steps`` is reached (no natural terminal state).
 
-Observation vector (flat float32, length 3*n + 3)
-    [  p_o(0)/P, a_o(0)/A, b_o(0)/B,          <- job features in current order
+Observation vector (flat float32, length ``3*n + 3``)::
+
+    [  p_o(0)/P, a_o(0)/A, b_o(0)/B,      # job features in current order
        p_o(1)/P, a_o(1)/A, b_o(1)/B,
        ...
        p_o(n-1)/P, a_o(n-1)/A, b_o(n-1)/B,
-       current_cost / initial_cost,             ← progress signal
-       step / max_steps,                        ← time budget used
-       h                                        ← due-date tightness
+       current_cost / initial_cost,         # progress signal
+       step / max_steps,                    # time budget used
+       h                                    # due-date tightness
     ]
-    P, A, B = max p_i, max a_i, max b_i  (instance-level normalisation)
+
+``P, A, B = max p_i, max a_i, max b_i`` (instance-level normalisation).
 
 Usage
 -----
+
+.. code-block:: python
+
     from orlib_sch import load
     from sch_env import SchEnv
 
@@ -46,13 +51,12 @@ Usage
     obs, info = env.reset()
     done = False
     while not done:
-        action = env.action_space_sample()       # random policy
+        action = env.action_space_sample()
         obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
 
     print(f"Final cost: {info['cost']}  Best cost: {info['best_cost']}")
 
-    # --- Batch runner (iterates over all instances in a dataset) ---
     from sch_env import run_episode
     result = run_episode(env, policy_fn=env.action_space_sample)
     print(result)
@@ -76,7 +80,15 @@ from .orlib_sch import SchInstance
 
 
 def _build_swap_pairs(n: int) -> np.ndarray[tuple[int, int]]:
-    """Return all (i, j) pairs with i < j, in lexicographic order."""
+    """
+    Return all (i, j) pairs with i < j, in lexicographic order.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n*(n-1)/2, 2)`` int64 array of swap pair indices.
+
+    """
     pairs = []
     for i in range(n):
         for j in range(i + 1, n):
@@ -122,6 +134,23 @@ class SchEnv:
         seed: int | None = None,
         reward_shaping: bool = True,
     ) -> None:
+        """
+        Initialise the scheduling environment.
+
+        Parameters
+        ----------
+        instance : SchInstance
+            The scheduling problem instance to wrap.
+        h : float
+            Due-date tightness (default 0.4).
+        max_steps : int | None
+            Episode length.  Defaults to ``10 * n``.
+        seed : int | None
+            RNG seed for reproducible resets.
+        reward_shaping : bool
+            If True (default), scale rewards by 1/initial_cost.
+
+        """
         self.instance = instance
         self.h = h
         self.n = instance.n
@@ -214,6 +243,13 @@ class SchEnv:
         truncated   : bool   - True when step budget is exhausted
         info        : dict
 
+        Raises
+        ------
+        RuntimeError
+            If called before ``reset()``.
+        ValueError
+            If *action* is out of the valid range.
+
         """
         if self._done:
             raise RuntimeError("Call reset() before step().")
@@ -248,6 +284,15 @@ class SchEnv:
     # ------------------------------------------------------------------
 
     def action_space_samples(self, n: int = 1) -> np.ndarray | int:
+        """
+        Sample *n* random action indices.
+
+        Returns
+        -------
+        np.ndarray | int
+            A single int when ``n == 1``, otherwise a 1-D int64 array of length *n*.
+
+        """
         samples = self._np_rng.integers(0, self.n_actions, n)
         if n == 1:
             samples = samples[0]
@@ -258,19 +303,42 @@ class SchEnv:
     def _decode_action_formula(n: int, action: int) -> tuple:
         """
         Numba-compiled O(1) decoder via quadratic formula.
+
         Cumulative pairs before row i = i*(2n-i-1)/2.
-        Solve i*(2n-i-1)/2 = action → i = ((2n-1) - sqrt((2n-1)²-8k)) / 2.
+        Solve i*(2n-i-1)/2 = action to get i = ((2n-1) - sqrt((2n-1)^2-8k)) / 2.
+
+        Returns
+        -------
+        tuple
+            The (i, j) position pair for the given action index.
+
         """
         i = int((2 * n - 1 - np.sqrt((2 * n - 1)**2 - 8 * action)) / 2)
         j = action - i * (2 * n - i - 1) // 2 + i + 1
         return i, j
 
     def decode_action(self, action: int) -> tuple[int, int]:
-        """Return the (i, j) position pair for a given action index. O(1) formula."""
+        """
+        Return the (i, j) position pair for a given action index. O(1) formula.
+
+        Returns
+        -------
+        tuple[int, int]
+            The (i, j) swap position pair.
+
+        """
         return self._decode_action_formula(self.n, action)
 
     def encode_action(self, i: int, j: int) -> int:
-        """Return the action index for swap positions (i, j). O(1)."""
+        """
+        Return the action index for swap positions (i, j). O(1).
+
+        Returns
+        -------
+        int
+            The action index corresponding to the (i, j) swap pair.
+
+        """
         return self._pair_to_action[(i, j) if i < j else (j, i)]
 
     # ------------------------------------------------------------------
@@ -278,18 +346,42 @@ class SchEnv:
     # ------------------------------------------------------------------
 
     def _compute_cost(self, schedule: np.ndarray) -> int:
-        """Evaluate the cost of *schedule* against this instance."""
+        """
+        Evaluate the cost of *schedule* against this instance.
+
+        Returns
+        -------
+        int
+            Total weighted earliness + tardiness penalty.
+
+        """
         return self.instance.evaluate(schedule, self.h)
 
     def evaluate_swap(self, i: int, j: int, h: float) -> int:
-        """Speculatively evaluate the cost of swapping positions i and j (one C call)."""
+        """
+        Speculatively evaluate the cost of swapping positions i and j (one C call).
+
+        Returns
+        -------
+        int
+            Cost after the swap, without modifying the current schedule.
+
+        """
         d = int(self.instance.sum_p * h)
         return int(evaluate_swap(
             self.instance.p_array, self.instance.a_array, self.instance.b_array,
             self._schedule, d, i, j))
 
     def _observe(self) -> np.ndarray:
-        """Build the flat float32 observation vector."""
+        """
+        Build the flat float32 observation vector.
+
+        Returns
+        -------
+        np.ndarray
+            Shape ``(obs_size,)`` float32 array of normalised job features and scalars.
+
+        """
         s = self._schedule
         obs = np.empty(self.obs_size, dtype=np.float32)
         n = self.instance.n
@@ -302,6 +394,16 @@ class SchEnv:
         return obs
 
     def _info(self) -> dict[str, Any]:
+        """
+        Build the info dict returned by reset() and step().
+
+        Returns
+        -------
+        dict[str, Any]
+            Dict with keys: cost, best_cost, best_schedule, step,
+            initial_cost, improvement, improvement_pct.
+
+        """
         return {
             "cost": self._cost,
             "best_cost": self._best_cost,
@@ -318,21 +420,33 @@ class SchEnv:
 
     @property
     def current_schedule(self) -> list[int]:
+        """Return the current job permutation as a list."""
         return self._schedule.tolist()
 
     @property
     def current_cost(self) -> int:
+        """Return the cost of the current schedule."""
         return self._cost
 
     @property
     def best_cost(self) -> int:
+        """Return the lowest cost seen since the last reset."""
         return self._best_cost
 
     @property
     def best_schedule(self) -> list[int]:
+        """Return the job permutation that achieved the lowest cost."""
         return self._best_schedule.tolist()
 
     def __repr__(self) -> str:
+        """
+        Return a concise string representation of the environment.
+
+        Returns
+        -------
+        str
+
+        """
         return (
             f"SchEnv(instance={self.instance.index}, n={self.n}, "
             f"h={self.h}, max_steps={self.max_steps}, "
@@ -362,6 +476,14 @@ class EpisodeResult:
     cost_history: list[int]
 
     def __repr__(self) -> str:
+        """
+        Return a concise string representation of the episode result.
+
+        Returns
+        -------
+        str
+
+        """
         return (
             f"EpisodeResult("
             f"inst={self.instance_index}, h={self.h}, "
@@ -470,6 +592,7 @@ def run_dataset(
     Parameters
     ----------
     instances : sequence of SchInstance
+        Scheduling instances to run episodes on.
     policy_fn_factory : callable(env) -> policy_fn
         Called once per instance to produce a per-episode policy.
         For a random policy: ``lambda env: env.action_space_sample``

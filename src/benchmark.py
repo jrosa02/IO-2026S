@@ -8,6 +8,7 @@ and comparison plots suitable for an academic report.
 
 from __future__ import annotations
 
+import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,8 +40,7 @@ class AgentBenchmarkResult:
     mean_n_steps: float = field(init=False)
 
     def __post_init__(self) -> None:
-        import statistics
-
+        """Compute derived aggregate statistics from the raw episode results."""
         imps = [r.improvement_pct for r in self.results]
         self.mean_improvement_pct = statistics.mean(imps) if imps else 0.0
         self.std_improvement_pct = statistics.stdev(imps) if len(imps) > 1 else 0.0
@@ -48,6 +48,14 @@ class AgentBenchmarkResult:
         self.mean_n_steps = statistics.mean(r.n_steps for r in self.results) if self.results else 0.0
 
     def __repr__(self) -> str:
+        """
+        Return a short string representation of the benchmark result.
+
+        Returns
+        -------
+        str
+
+        """
         return (
             f"AgentBenchmarkResult(agent={self.agent_name!r}, "
             f"n_instances={len(self.results)}, "
@@ -73,7 +81,7 @@ class BenchmarkRunner:
     max_steps : int | None
         Episode length per instance (default: 10 * n from SchEnv).
     seed : int | None
-        RNG seed used for every agent × instance run, enabling fair comparison.
+        RNG seed used for every agent x instance run, enabling fair comparison.
 
     """
 
@@ -84,6 +92,21 @@ class BenchmarkRunner:
         max_steps: int | None = None,
         seed: int | None = None,
     ) -> None:
+        """
+        Initialise the benchmark runner.
+
+        Parameters
+        ----------
+        instances : sequence of SchInstance
+            Instances to benchmark against.
+        h : float
+            Due-date tightness (default 0.4).
+        max_steps : int | None
+            Episode length per instance (default: 10 * n from SchEnv).
+        seed : int | None
+            RNG seed used for every agent x instance run, enabling fair comparison.
+
+        """
         self.instances = list(instances)
         self.h = h
         self.max_steps = max_steps
@@ -143,10 +166,15 @@ class BenchmarkRunner:
 
     def to_dataframe(self, results: dict[str, AgentBenchmarkResult]) -> pd.DataFrame:
         """
-        Flatten results into a tidy DataFrame (one row per agent × instance).
+        Flatten results into a tidy DataFrame (one row per agent x instance).
 
         Columns: agent, instance_index, initial_cost, best_cost,
-                 improvement_pct, n_steps, n_improvements, total_reward
+        improvement_pct, n_steps, n_improvements, total_reward.
+
+        Returns
+        -------
+        pd.DataFrame
+
         """
         rows = [
             {

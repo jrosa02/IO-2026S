@@ -13,7 +13,7 @@ Notes
 -----
 - Override ``act()`` for iterative (swap-based) agents.
 - Override ``construct()`` for constructive agents that build an initial schedule.
-- Override ``train()/save()/load()`` for learning agents (e.g. PPO).
+- Override ``train()/save()/load()`` for learning agents.
 - ``solve()`` is concrete and orchestrates a full episode via :func:`run_episode`.
 
 """
@@ -76,13 +76,13 @@ class Agent(ABC):
         """
         raise NotImplementedError(f"{self.name}.act() is not implemented")
 
-    def construct(self, instance: SchInstance) -> list[int] | None:
+    def construct(self, _instance: SchInstance) -> list[int] | None:
         """
         Optionally build an initial job permutation before the iterative phase.
 
         Parameters
         ----------
-        instance : SchInstance
+        _instance : SchInstance
             The scheduling instance to construct a schedule for.
 
         Returns
@@ -107,7 +107,15 @@ class Agent(ABC):
     def _make_recording_policy(
         self, env: SchEnv, policy_fn: Callable
     ) -> Callable[[np.ndarray], int]:
-        """Wrap a policy function to record decoded swap pairs as (i, j) tuples."""
+        """
+        Wrap a policy function to record decoded swap pairs as (i, j) tuples.
+
+        Returns
+        -------
+        Callable[[np.ndarray], int]
+            A wrapped policy that records each selected (i, j) swap in ``self.actions``.
+
+        """
 
         def wrapper(obs: np.ndarray) -> int:
             # Handle both obs-accepting and no-arg policy functions
@@ -155,36 +163,47 @@ class Agent(ABC):
 
     def train(
         self,
-        instances: Sequence[SchInstance],
+        _instances: Sequence[SchInstance],
         *,
         h: float = 0.4,
-        **kwargs,
+        **_kwargs,
     ) -> None:
         """
         Train the agent on a collection of instances.
 
         Default implementation is a no-op.  Override in learning agents.
         """
+        _ = h  # suppress ARG002; subclasses may use this parameter
 
-    def save(self, path: Path | str) -> None:
+    def save(self, _path: Path | str) -> None:
         """
-        Persist agent state to *path*.
-
-        Default implementation is a no-op.  Override in learning agents.
-        """
-
-    def load(self, path: Path | str) -> None:
-        """
-        Restore agent state from *path*.
+        Persist agent state to *_path*.
 
         Default implementation is a no-op.  Override in learning agents.
         """
+        return  # no-op default; subclasses override for persistence
+
+    def load(self, _path: Path | str) -> None:
+        """
+        Restore agent state from *_path*.
+
+        Default implementation is a no-op.  Override in learning agents.
+        """
+        return  # no-op default; subclasses override for persistence
 
     # ------------------------------------------------------------------
     # Repr
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
+        """
+        Return a short string representation of the agent.
+
+        Returns
+        -------
+        str
+
+        """
         return f"{self.name}()"
 
 
@@ -202,7 +221,14 @@ class RandomAgent(Agent):
     """
 
     def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
-        """Run an episode with a random policy using the env's own RNG."""
+        """
+        Run an episode with a random policy using the env's own RNG.
+
+        Returns
+        -------
+        EpisodeResult
+
+        """
         env.reset(seed=seed)
         self._solve_init(env)
         recording_policy = self._make_recording_policy(env, lambda _: env.action_space_samples())
@@ -221,12 +247,19 @@ class GreedyAgent(Agent):
     """
 
     def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
-        """Run a greedy episode with exhaustive 1-step look-ahead."""
+        """
+        Run a greedy episode with exhaustive 1-step look-ahead.
+
+        Returns
+        -------
+        EpisodeResult
+
+        """
         start_schedule = self.construct(env.instance)
         env.reset(seed=seed, schedule=start_schedule)
         self._solve_init(env)
 
-        def greedy_policy(obs: np.ndarray) -> int:
+        def greedy_policy(_obs: np.ndarray) -> int:
             best_action = 0
             best_cost = float("inf")
             schedule = env.current_schedule  # returns a copy

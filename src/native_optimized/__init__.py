@@ -55,9 +55,13 @@ if _evaluate_mod is None or _crossover_mod is None:
     _crossover_mod = _load_module("crossover_opt")
 
 if _evaluate_mod is None:
-    raise ImportError("evaluate_opt extension not found after build. Run: python setup.py build_ext --inplace")
+    raise ImportError(
+        "evaluate_opt extension not found after build. Run: python setup.py build_ext --inplace"
+    )
 if _crossover_mod is None:
-    raise ImportError("crossover_opt extension not found after build. Run: python setup.py build_ext --inplace")
+    raise ImportError(
+        "crossover_opt extension not found after build. Run: python setup.py build_ext --inplace"
+    )
 
 # ---------------------------------------------------------------------------
 # Public API — function references bound once at import time

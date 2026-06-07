@@ -32,6 +32,17 @@ def _extract_json(text: str) -> dict:
 
     Handles responses wrapped in markdown code fences (```json ... ```) as
     well as raw JSON objects.  Raises ``ValueError`` if nothing is found.
+
+    Returns
+    -------
+    dict
+        The parsed JSON object.
+
+    Raises
+    ------
+    ValueError
+        If no JSON object is found in *text*.
+
     """
     # Markdown code fence first
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
@@ -66,6 +77,12 @@ class AgentConfig(ABC):
         The string must contain a valid JSON object so that ``from_prompt``
         can round-trip it.  Extra prose explaining parameter semantics is
         encouraged — the LLM uses it for reflection.
+
+        Returns
+        -------
+        str
+            Annotated prompt string containing a JSON config block.
+
         """
 
     @classmethod
@@ -78,7 +95,16 @@ class AgentConfig(ABC):
         clamps all values within ``bounds()``, and fills missing keys with
         the dataclass defaults.
 
-        Raises ``ValueError`` if no JSON object is found in *text*.
+        Returns
+        -------
+        Self
+            A new config instance with values parsed from *text*.
+
+        Raises
+        ------
+        ValueError
+            If no JSON object is found in *text*.
+
         """
 
     @abstractmethod
@@ -87,6 +113,12 @@ class AgentConfig(ABC):
         Return ``{field_name: (lo, hi)}`` for every optimisable numeric field.
 
         Used by ``clamp()`` to keep LLM-proposed values sane.
+
+        Returns
+        -------
+        dict[str, tuple[float, float]]
+            Mapping of field name to (lower, upper) bounds.
+
         """
 
     def clamp(self, values: dict) -> dict:
@@ -95,6 +127,12 @@ class AgentConfig(ABC):
 
         Preserves the original Python type (int vs float) of each value.
         Keys not present in ``bounds()`` are passed through unchanged.
+
+        Returns
+        -------
+        dict
+            A new dict with all values clamped within their declared bounds.
+
         """
         b = self.bounds()
         result = {}
@@ -131,6 +169,15 @@ class SAConfig(AgentConfig):
     _OPTIM_FIELDS: ClassVar[tuple[str, ...]] = ("T0", "b", "c", "d", "T_min")
 
     def to_prompt(self) -> str:
+        """
+        Render the SA config as an annotated JSON prompt string for the LLM.
+
+        Returns
+        -------
+        str
+            Annotated prompt string containing the current SA hyperparameter values.
+
+        """
         config_dict = {
             "T0": self.T0,
             "b": self.b,
@@ -152,6 +199,20 @@ class SAConfig(AgentConfig):
 
     @classmethod
     def from_prompt(cls, text: str) -> Self:
+        """
+        Parse an LLM response and return a clamped SAConfig.
+
+        Returns
+        -------
+        Self
+            A new SAConfig with values parsed and clamped from *text*.
+
+        Raises
+        ------
+        ValueError
+            If no recognised SAConfig fields are found in the LLM response.
+
+        """
         raw = _extract_json(text)
         defaults = cls()
         parsed = {
@@ -166,6 +227,15 @@ class SAConfig(AgentConfig):
         return cls(**clamped, temp_plot_file=defaults.temp_plot_file)
 
     def bounds(self) -> dict[str, tuple[float, float]]:
+        """
+        Return allowed ranges for all SA hyperparameters.
+
+        Returns
+        -------
+        dict[str, tuple[float, float]]
+            Mapping of field name to (lower, upper) bounds.
+
+        """
         return {
             "T0": (1.0, 10_000.0),
             "b": (1e-6, 0.1),
@@ -190,10 +260,21 @@ class GAConfig(AgentConfig):
     elite_size: int = 1
     reoptimize_every: int = 10
 
-    _INT_FIELDS: ClassVar[tuple[str, ...]] = ("population_size", "generations", "elite_size", "reoptimize_every")
+    _INT_FIELDS: ClassVar[tuple[str, ...]] = (
+        "population_size", "generations", "elite_size", "reoptimize_every"
+    )
     _FLOAT_FIELDS: ClassVar[tuple[str, ...]] = ("mutation_rate",)
 
     def to_prompt(self) -> str:
+        """
+        Render the GA config as an annotated JSON prompt string for the LLM.
+
+        Returns
+        -------
+        str
+            Annotated prompt string containing the current GA hyperparameter values.
+
+        """
         config_dict = {
             "population_size": self.population_size,
             "generations": self.generations,
@@ -215,6 +296,20 @@ class GAConfig(AgentConfig):
 
     @classmethod
     def from_prompt(cls, text: str) -> Self:
+        """
+        Parse an LLM response and return a clamped GAConfig.
+
+        Returns
+        -------
+        Self
+            A new GAConfig with values parsed and clamped from *text*.
+
+        Raises
+        ------
+        ValueError
+            If no recognised GAConfig fields are found in the LLM response.
+
+        """
         raw = _extract_json(text)
         defaults = cls()
         all_fields = cls._INT_FIELDS + cls._FLOAT_FIELDS
@@ -229,6 +324,15 @@ class GAConfig(AgentConfig):
         return cls(**clamped)
 
     def bounds(self) -> dict[str, tuple[float, float]]:
+        """
+        Return allowed ranges for all GA hyperparameters.
+
+        Returns
+        -------
+        dict[str, tuple[float, float]]
+            Mapping of field name to (lower, upper) bounds.
+
+        """
         return {
             "population_size": (10, 500),
             "generations": (1, 100),

@@ -1,51 +1,34 @@
 """
-visualize.py — Visualization of Scheduling Solutions
-=====================================================
+visualize.py — Visualization of Scheduling Solutions.
+
 Provides functions to create publication-quality visualizations of final schedules,
 including Gantt charts, cost breakdowns, and improvement tracking.
 
 Features
 --------
-    - Gantt chart showing job execution timeline with earliness/tardiness
-    - Cost breakdown (earliness vs tardiness penalties)
-    - Schedule comparison (before/after optimization)
-    - Training curves (loss, improvement over time)
-    - Instance heatmaps and statistics
+- Gantt chart showing job execution timeline with earliness/tardiness
+- Cost breakdown (earliness vs tardiness penalties)
+- Schedule comparison (before/after optimization)
+- Training curves (loss, improvement over time)
+- Instance heatmaps and statistics
 
-Requirements
-    pip install matplotlib numpy
+Requirements: ``matplotlib``, ``numpy``.
 
 Usage
 -----
+
+.. code-block:: python
+
     from orlib_sch import load
     from sch_env import SchEnv, run_episode
-    from visualize import (
-        plot_gantt_chart,
-        plot_cost_breakdown,
-        plot_schedule_comparison,
-        plot_training_curves,
-    )
+    from visualize import plot_gantt_chart, plot_cost_breakdown
 
-    # Generate a schedule
     ds = load("sch10.txt")
     env = SchEnv(ds[0], h=0.4)
-    initial_schedule = list(range(env.n))
     result = run_episode(env, env.action_space_sample)
 
-    # Visualize
-    plot_gantt_chart(
-        env.instance,
-        result.best_schedule,
-        h=0.4,
-        save_path="gantt.png"
-    )
+    plot_gantt_chart(env.instance, result.best_schedule, h=0.4, save_path="gantt.png")
     plot_cost_breakdown(env.instance, result.best_schedule, h=0.4)
-    plot_schedule_comparison(
-        env.instance,
-        initial_schedule,
-        result.best_schedule,
-        h=0.4
-    )
 """
 
 from __future__ import annotations
@@ -64,8 +47,10 @@ from src.benchmark import AgentBenchmarkResult
 
 try:
     from .orlib_sch import SchInstance
+    from .sch_env import EpisodeResult
 except ImportError:
-    from orlib_sch import SchInstance
+    from orlib_sch import SchInstance  # type: ignore[no-redef]
+    from sch_env import EpisodeResult  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Color palette
@@ -88,7 +73,13 @@ def _compute_job_timeline(instance: SchInstance, schedule: Sequence[int], h: flo
     Compute timeline data for each job in the schedule.
 
     Returns a list of dicts with keys:
-        job_idx, rank, start, end, duration, color, early_cost, late_cost
+    job_idx, rank, start, end, duration, color, early_cost, late_cost.
+
+    Returns
+    -------
+    list[dict]
+        One dict per job in schedule order.
+
     """
     d = instance.due_date(h)
     jobs_data = []
@@ -122,7 +113,12 @@ def _compute_job_timeline(instance: SchInstance, schedule: Sequence[int], h: flo
     return jobs_data
 
 
-def _draw_gantt_on_ax(ax: matplotlib.axes.Axes, instance: SchInstance, schedule: Sequence[int], h: float) -> None:
+def _draw_gantt_on_ax(
+    ax: matplotlib.axes.Axes,
+    instance: SchInstance,
+    schedule: Sequence[int],
+    h: float,
+) -> None:
     """Draw a Gantt chart onto an existing axes."""
     d = instance.due_date(h)
     n = len(schedule)
@@ -282,11 +278,12 @@ def plot_cost_breakdown(
         Due-date tightness factor.
     instance_index : int
         Index into each agent's result list.
-    top_k : int
-        Number of jobs flagged as deletion candidates (default 5).
     figsize : tuple
+        Figure size (width, height).
     save_path : str | Path | None
+        If provided, save the figure to this path.
     show : bool
+        If True, display the figure.
 
     Returns
     -------
@@ -294,11 +291,8 @@ def plot_cost_breakdown(
     axes : list of matplotlib.axes.Axes
 
     """
-    # ------------------------------------------------------------------
-    # Aggregate per-job costs across agents
-    # ------------------------------------------------------------------
-    # job_data[job_id] = {"early": [...], "late": [...]}
-    # aggregated only over instance_index for bar/heatmap/scatter
+    # Aggregate per-job costs across agents.
+    # job_data[job_id] holds early/late penalty lists aggregated over instance_index.
     job_data: dict[int, dict[str, list[float]]] = {
         j: {"early": [], "late": []} for j in range(instance.n)
     }
@@ -337,8 +331,8 @@ def plot_cost_breakdown(
     sorted_std_e = std_early[order]
     sorted_mean_l = mean_late[order]
     sorted_std_l = std_late[order]
-    sorted_mean_t = mean_total[order]
-    sorted_std_t = std_total[order]
+    mean_total[order]
+    std_total[order]
 
     # ------------------------------------------------------------------
     # Figure
@@ -363,7 +357,7 @@ def plot_cost_breakdown(
     ax.legend(fontsize=9)
     ax.grid(axis="y", alpha=0.3)
 
-    # --- Subplot 2: per-job cost heatmap (jobs × agents) ---
+    # --- Subplot 2: per-job cost heatmap (jobs x agents) ---
     ax = axes[1]
     agent_names = list(results.keys())
     # matrix: rows = jobs sorted by mean cost, cols = agents
@@ -647,7 +641,7 @@ def plot_training_curves(
             verticalalignment="top", fontfamily="monospace",
             bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
 
-    fig.suptitle("PPO Training Progress", fontsize=13, fontweight="bold")
+    fig.suptitle("Training Progress", fontsize=13, fontweight="bold")
     fig.tight_layout()
 
     if save_path is not None:
@@ -703,6 +697,12 @@ def animate_agent_actions(
     -------
     anim : matplotlib.animation.FuncAnimation
         The animation object (can be saved or displayed).
+
+    Raises
+    ------
+    ValueError
+        If the agent is missing ``.actions`` or ``.initial_schedule`` attributes,
+        or if no actions were recorded (agent.solve() was not called).
 
     """
     if not hasattr(agent, "actions") or not hasattr(agent, "initial_schedule"):
@@ -803,11 +803,15 @@ def plot_convergence_curves(
     Parameters
     ----------
     results : dict[str, AgentBenchmarkResult]
-        Mapping of agent name → AgentBenchmarkResult as returned by BenchmarkRunner.run().
+        Mapping of agent name to AgentBenchmarkResult as returned by BenchmarkRunner.run().
     title : str
+        Plot title.
     figsize : tuple
+        Figure size (width, height).
     show : bool
+        If True, display the figure.
     save_path : str | None
+        If provided, save the figure to this path.
 
     Returns
     -------
@@ -837,7 +841,7 @@ def plot_convergence_curves(
         best = padded.min(axis=0)
 
         ax.plot(xs, mean, label=f"{name} (mean)", color=color, linewidth=1.8)
-        ax.fill_between(xs, mean - std, mean + std, color=color, alpha=0.2, label=f"{name} (±1σ)")
+        ax.fill_between(xs, mean - std, mean + std, color=color, alpha=0.2, label=f"{name} (+/-1 std)")
         ax.plot(xs, best, color=color, linewidth=1.0, linestyle="--", alpha=0.7, label=f"{name} (best)")
 
     ax.set_xlabel("Step")
@@ -862,16 +866,20 @@ def plot_agent_comparison(
     save_path: str | None = None,
 ):
     """
-    Side-by-side comparison of agents: bar chart of mean improvement% and
-    box plot of best-cost distribution.
+    Side-by-side comparison of agents.
+
+    Produces a bar chart of mean improvement% and a box plot of best-cost distribution.
 
     Parameters
     ----------
     results : dict[str, AgentBenchmarkResult]
         Output of BenchmarkRunner.run().
     figsize : tuple
+        Figure size (width, height).
     show : bool
+        If True, display the figure.
     save_path : str | None
+        If provided, save the figure to this path.
 
     Returns
     -------
@@ -957,13 +965,21 @@ def plot_gepa_history(
     best_result : EpisodeResult | None
         Episode result from the best found config on the same instance.
     figsize : tuple
+        Figure size (width, height).
     save_path : str | Path | None
+        If provided, save the figure to this path.
     show : bool
+        If True, display the figure.
 
     Returns
     -------
     fig : matplotlib.figure.Figure
     axes : list of matplotlib.axes.Axes
+
+    Raises
+    ------
+    ValueError
+        If ``gepa_agent.history_`` is empty (i.e. train() was not called).
 
     """
     history = gepa_agent.history_
@@ -1150,16 +1166,7 @@ if __name__ == "__main__":
     # Create visualizations
     print("\nGenerating visualizations...")
 
-    # plot_gantt_chart(inst, result.best_schedule, h=0.4, show=True)
-    # print("  ✓ Gantt chart")
-
-    # plot_cost_breakdown(inst, result.best_schedule, h=0.4, show=True)
-    # print("  ✓ Cost breakdown")
-
-    # plot_schedule_comparison(inst, agent.initial_schedule, result.best_schedule, h=0.4, show=True)
-    # print("  ✓ Schedule comparison")
-
     animate_agent_actions(env, inst)
-    print("  ✓ Agent actions animation")
+    print("  Agent actions animation done")
 
     print("\nDemo complete!")

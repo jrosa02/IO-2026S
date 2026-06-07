@@ -14,7 +14,7 @@ HyperparamAdapter(SchedulingGEPAAdapter)
 GEPAAgent(Agent)
     Wraps GEPA hyperparameter search as a standard Agent.
     - train()  runs gepa.optimize() to find the best config.
-    - solve()  delegates to the base agent instantiated with best_config_.
+    - solve()  delegates to the base agent instantiated with ``best_config_``.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ import gepa
 import litellm
 
 from .agent import Agent
+from .classical_agents import GeneticAlgorithmAgent, SimulatedAnnealingAgent
 from .configs import AgentConfig
 from .gepa_base import SchedulingGEPAAdapter
 from .orlib_sch import SchInstance
@@ -46,8 +47,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class _NullLogger:
-    def log(self, msg: str) -> None:
-        pass
+    """No-op logger that silences GEPA's internal verbose output."""
+
+    def log(self, _msg: str) -> None:
+        """Discard the log message."""
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +63,17 @@ class GEPAProgressCallback:
     _W = 66
 
     def __init__(self, adapter: HyperparamAdapter, max_metric_calls: int) -> None:
+        """
+        Initialise the progress callback.
+
+        Parameters
+        ----------
+        adapter : HyperparamAdapter
+            The adapter whose ``history_`` is inspected for per-iteration details.
+        max_metric_calls : int
+            Total evaluation budget, used to display progress.
+
+        """
         self._adapter = adapter
         self._max_calls = max_metric_calls
         self._calls_used: int = 0
@@ -101,20 +115,24 @@ class GEPAProgressCallback:
     # Callbacks
     # ------------------------------------------------------------------
 
-    def on_optimization_start(self, event: dict) -> None:
+    def on_optimization_start(self, _event: dict) -> None:
+        """Print an opening banner when optimisation begins."""
         print(self._bar("GEPA OPTIMIZATION START"))
         print(f"  Budget  : {self._max_calls} metric calls")
         print(self._bar())
         print()
 
     def on_budget_updated(self, event: dict) -> None:
+        """Update the running count of metric calls consumed."""
         self._calls_used = event["metric_calls_used"]
 
-    def on_iteration_start(self, event: dict) -> None:
+    def on_iteration_start(self, _event: dict) -> None:
+        """Record the history start index and clear the pending valset."""
         self._iter_hist_start = len(self._adapter.history_)
         self._pending_valset = None
 
     def on_valset_evaluated(self, event: dict) -> None:
+        """Print the valset evaluation result; track the best score seen."""
         iteration = event["iteration"]
         scores = event["scores_by_val_id"]
         avg = event["average_score"]
@@ -149,6 +167,7 @@ class GEPAProgressCallback:
                 self._best_config_params = history[-1]["config_params"]
 
     def on_evaluation_skipped(self, event: dict) -> None:
+        """Print a block explaining why the candidate evaluation was skipped."""
         iteration = event["iteration"]
         reason = event["reason"]
         print(self._bar(f"Iter {iteration}  SKIPPED"))
@@ -158,6 +177,7 @@ class GEPAProgressCallback:
         print()
 
     def on_candidate_accepted(self, event: dict) -> None:
+        """Print a summary block for an accepted (improved) candidate."""
         iteration = event["iteration"]
         history = self._adapter.history_
         s = self._iter_hist_start
@@ -191,7 +211,7 @@ class GEPAProgressCallback:
         best_tag = "  [*** NEW BEST ***]" if is_best else ""
         print(self._bar(f"Iter {iteration}  ACCEPTED{best_tag}"))
         print(f"  Config  : {self._fmt_config(config_params)}")
-        print(f"▶ SCORE  : {score_after:.3f}  (Δ{sign}{delta:.3f} vs curr-prog same batch)  [GEPA optimises this]")
+        print(f"▶ SCORE  : {score_after:.3f}  (Δ{sign}{delta:.3f} vs curr-prog)  [GEPA optimises this]")
         if quality_scores:
             print(f"  Quality : improv%  {self._fmt_quality(quality_scores)}")
         print(f"  Valset  : {self._fmt_valset(val_ids, val_avg)}")
@@ -200,6 +220,7 @@ class GEPAProgressCallback:
         print()
 
     def on_candidate_rejected(self, event: dict) -> None:
+        """Print a summary block for a rejected (worse) candidate."""
         iteration = event["iteration"]
         history = self._adapter.history_
         s = self._iter_hist_start
@@ -222,7 +243,7 @@ class GEPAProgressCallback:
 
         print(self._bar(f"Iter {iteration}  REJECTED"))
         print(f"  Config  : {self._fmt_config(config_params)}")
-        print(f"▶ SCORE  : {score_after:.3f}  (Δ{sign}{delta:.3f} vs curr-prog same batch)  [worse — GEPA rejected]")
+        print(f"▶ SCORE  : {score_after:.3f}  (Δ{sign}{delta:.3f} vs curr-prog)  [worse — GEPA rejected]")
         if quality_scores:
             print(f"  Quality : improv%  {self._fmt_quality(quality_scores)}")
         print(f"  Time    : {elapsed:.2f} s/run   Calls: {self._budget()}")
@@ -230,6 +251,7 @@ class GEPAProgressCallback:
         print()
 
     def on_optimization_end(self, event: dict) -> None:
+        """Print the final summary block when GEPA finishes."""
         total_iter = event["total_iterations"]
         total_calls = event["total_metric_calls"]
         print(self._bar("DONE"))
@@ -242,6 +264,20 @@ class GEPAProgressCallback:
 
 
 def _load_prompt(name: str) -> str:
+    """
+    Load a prompt template from the ``prompts/`` directory.
+
+    Returns
+    -------
+    str
+        Contents of the prompt file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the prompt file does not exist at the expected path.
+
+    """
     path = Path(__file__).parent.parent / "prompts" / name
     if path.exists():
         return path.read_text(encoding="utf-8")
@@ -259,7 +295,15 @@ _GA_REFLECTION_PROMPT = _load_prompt("ga_reflection.txt")
 
 
 def _describe_convergence(cost_history: list[int]) -> str:
-    """Summarise the convergence pattern of a cost history trace."""
+    """
+    Summarise the convergence pattern of a cost history trace.
+
+    Returns
+    -------
+    str
+        A plain-English description of when and how the cost improved.
+
+    """
     if len(cost_history) < 3:
         return "insufficient steps to determine convergence pattern"
 
@@ -327,6 +371,23 @@ class HyperparamAdapter(SchedulingGEPAAdapter):
         max_steps: int | None = None,
         seed: int | None = None,
     ) -> None:
+        """
+        Initialise the adapter.
+
+        Parameters
+        ----------
+        base_agent_cls : type
+            The agent class to instantiate (SimulatedAnnealingAgent or GeneticAlgorithmAgent).
+        seed_config : AgentConfig
+            Starting config; also used as fallback when LLM output cannot be parsed.
+        h : float
+            Due-date tightness for all evaluation episodes.
+        max_steps : int | None
+            Episode length forwarded to SchEnv (None means 10 * n default).
+        seed : int | None
+            RNG seed forwarded to agent.solve().
+
+        """
         super().__init__(seed_config=seed_config)
         self.base_agent_cls = base_agent_cls
         self.h = h
@@ -336,6 +397,15 @@ class HyperparamAdapter(SchedulingGEPAAdapter):
     N_RUNS: int = 3
 
     def _run(self, instance: SchInstance, config: AgentConfig) -> EpisodeResult:
+        """
+        Run *config* on *instance* N_RUNS times and return an averaged EpisodeResult.
+
+        Returns
+        -------
+        EpisodeResult
+            Averaged metrics across runs; best_schedule from the best-cost run.
+
+        """
         results = []
         for _ in range(self.N_RUNS):
             env = SchEnv(instance, h=self.h, max_steps=self.max_steps)
@@ -356,6 +426,15 @@ class HyperparamAdapter(SchedulingGEPAAdapter):
         )
 
     def _feedback(self, result: EpisodeResult) -> str:
+        """
+        Build a plain-English feedback string from *result* for the LLM.
+
+        Returns
+        -------
+        str
+            Feedback string describing the quality, convergence, and any issues.
+
+        """
         improvement = result.initial_cost - result.best_cost
         convergence = _describe_convergence(result.cost_history)
         parts = [
@@ -389,8 +468,10 @@ class HyperparamAdapter(SchedulingGEPAAdapter):
 
 class GEPAAgent(Agent):
     """
-    Scheduling agent that uses GEPA to search for the best hyperparameter config
-    for a given base agent class (SA or GA), then delegates solve() to it.
+    Scheduling agent wrapping GEPA hyperparameter search.
+
+    Uses GEPA to search for the best hyperparameter config for a given base
+    agent class (SA or GA), then delegates solve() to it.
 
     Parameters
     ----------
@@ -430,6 +511,7 @@ class GEPAAgent(Agent):
         seed: int | None = None,
         interactions_log: str | Path | None = None,
     ) -> None:
+        """Initialise the GEPAAgent; see class docstring for parameter descriptions."""
         self.base_agent_cls = base_agent_cls
         self.seed_config = seed_config
         self.reflection_lm = reflection_lm
@@ -443,14 +525,12 @@ class GEPAAgent(Agent):
 
         if reflection_prompt is not None:
             self.reflection_prompt = reflection_prompt
+        elif base_agent_cls is SimulatedAnnealingAgent:
+            self.reflection_prompt = _SA_REFLECTION_PROMPT
+        elif base_agent_cls is GeneticAlgorithmAgent:
+            self.reflection_prompt = _GA_REFLECTION_PROMPT
         else:
-            from .classical_agents import GeneticAlgorithmAgent, SimulatedAnnealingAgent
-            if base_agent_cls is SimulatedAnnealingAgent:
-                self.reflection_prompt = _SA_REFLECTION_PROMPT
-            elif base_agent_cls is GeneticAlgorithmAgent:
-                self.reflection_prompt = _GA_REFLECTION_PROMPT
-            else:
-                self.reflection_prompt = _DEFAULT_REFLECTION_PROMPT
+            self.reflection_prompt = _DEFAULT_REFLECTION_PROMPT
 
     # ------------------------------------------------------------------
     # Training
@@ -461,7 +541,7 @@ class GEPAAgent(Agent):
         instances: Sequence[SchInstance],
         *,
         h: float = 0.4,
-        **kwargs,
+        **_kwargs,
     ) -> None:
         """
         Run GEPA hyperparameter search over *instances*.
@@ -482,16 +562,17 @@ class GEPAAgent(Agent):
         interactions: list[dict[str, Any]] = []
 
         def _log_interaction(
-            kwargs: dict[str, Any],
+            call_kwargs: dict[str, Any],
             response_obj: Any,
             start_time: datetime,
             end_time: datetime,
         ) -> None:
+            """Record one LLM call into *interactions*."""
             try:
                 interactions.append({
                     "timestamp": start_time.astimezone(UTC).isoformat(),
-                    "model": kwargs.get("model"),
-                    "messages": kwargs.get("messages"),
+                    "model": call_kwargs.get("model"),
+                    "messages": call_kwargs.get("messages"),
                     "response": response_obj.choices[0].message.content,
                     "duration_ms": int((end_time - start_time).total_seconds() * 1000),
                 })
@@ -536,7 +617,14 @@ class GEPAAgent(Agent):
     # ------------------------------------------------------------------
 
     def solve(self, env: SchEnv, *, seed: int | None = None) -> EpisodeResult:
-        """Solve *env* using the base agent instantiated with ``best_config_``."""
+        """
+        Solve *env* using the base agent instantiated with ``best_config_``.
+
+        Returns
+        -------
+        EpisodeResult
+
+        """
         agent = self.base_agent_cls(self.best_config_)
         result = agent.solve(env, seed=seed)
         self.actions = agent.actions
@@ -546,4 +634,5 @@ class GEPAAgent(Agent):
 
     @property
     def name(self) -> str:
+        """Return the agent name including the base agent class name."""
         return f"GEPA-{self.base_agent_cls.__name__}"

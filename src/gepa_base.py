@@ -29,11 +29,6 @@ from .sch_env import EpisodeResult
 
 logger = logging.getLogger(__name__)
 
-# Type aliases matching the GEPAAdapter protocol slots for this task:
-#   DataInst      = SchInstance
-#   Trajectory    = EpisodeResult
-#   RolloutOutput = EpisodeResult
-
 
 class SchedulingGEPAAdapter:
     """
@@ -55,6 +50,15 @@ class SchedulingGEPAAdapter:
     TIME_PENALTY_WEIGHT: float = 0.2
 
     def __init__(self, seed_config: AgentConfig) -> None:
+        """
+        Initialise the adapter with a seed config used as parse fallback.
+
+        Parameters
+        ----------
+        seed_config : AgentConfig
+            Fallback config used when the LLM response cannot be parsed.
+
+        """
         self.seed_config = seed_config
         self.history_: list[dict] = []  # populated by evaluate(); one entry per GEPA call
         self._call_idx: int = 0
@@ -96,6 +100,12 @@ class SchedulingGEPAAdapter:
 
         Scores are normalised improvement percentages in [0, 1] (higher = better).
         Individual failures are caught and scored 0.0 so GEPA never sees an exception.
+
+        Returns
+        -------
+        EvaluationBatch[EpisodeResult, EpisodeResult]
+            Batch with outputs, per-instance scores, and optionally trajectories.
+
         """
         config = self._parse_candidate(candidate)
         outputs: list[EpisodeResult] = []
@@ -159,7 +169,7 @@ class SchedulingGEPAAdapter:
         self,
         candidate: dict[str, str],
         eval_batch: EvaluationBatch[EpisodeResult, EpisodeResult],
-        components_to_update: list[str],
+        _components_to_update: list[str],
     ) -> Mapping[str, Sequence[Mapping[str, Any]]]:
         """
         Build the per-component reflective dataset consumed by the LLM proposer.
@@ -167,6 +177,13 @@ class SchedulingGEPAAdapter:
         Each record gives the LLM the current config text, the numeric outcome,
         and a plain-English diagnosis so it can propose a targeted mutation.
         The first record is an optimization history summary when prior calls exist.
+
+        Returns
+        -------
+        Mapping[str, Sequence[Mapping[str, Any]]]
+            A dict keyed by component name (``"config"``) mapping to a list of
+            record dicts with ``Inputs``, ``Generated Outputs``, and ``Feedback`` fields.
+
         """
         if eval_batch.trajectories is None:
             return {"config": []}
@@ -190,7 +207,15 @@ class SchedulingGEPAAdapter:
         return {"config": records}
 
     def _format_history_summary(self) -> str:
-        """Format self.history_ as a compact table for LLM injection."""
+        """
+        Format self.history_ as a compact table for LLM injection.
+
+        Returns
+        -------
+        str
+            A multi-line ASCII table of past evaluate() calls.
+
+        """
         lines = ["call | result   | score  | time_s | params"]
         lines.append("-----|----------|--------|--------|-------")
         for entry in self.history_:
@@ -216,6 +241,12 @@ class SchedulingGEPAAdapter:
 
         Falls back to ``self.seed_config`` on any parse failure so the
         optimisation loop never stalls on a bad LLM response.
+
+        Returns
+        -------
+        AgentConfig
+            Parsed config, or ``self.seed_config`` on parse failure.
+
         """
         text = candidate.get("config", "")
         if not text:
@@ -234,7 +265,15 @@ class SchedulingGEPAAdapter:
 
 
 def _zero_result(instance: SchInstance) -> EpisodeResult:
-    """Return a zero-improvement EpisodeResult for failed evaluations."""
+    """
+    Return a zero-improvement EpisodeResult for failed evaluations.
+
+    Returns
+    -------
+    EpisodeResult
+        An EpisodeResult with zero improvement and minimal cost values.
+
+    """
     return EpisodeResult(
         instance_index=instance.index,
         h=0.0,
