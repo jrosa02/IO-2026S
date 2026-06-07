@@ -21,7 +21,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-
 # ---------------------------------------------------------------------------
 # JSON extraction helper
 # ---------------------------------------------------------------------------

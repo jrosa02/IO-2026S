@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -59,7 +59,7 @@ class GEPAProgressCallback:
 
     _W = 66
 
-    def __init__(self, adapter: "HyperparamAdapter", max_metric_calls: int) -> None:
+    def __init__(self, adapter: HyperparamAdapter, max_metric_calls: int) -> None:
         self._adapter = adapter
         self._max_calls = max_metric_calls
         self._calls_used: int = 0
@@ -162,9 +162,9 @@ class GEPAProgressCallback:
         history = self._adapter.history_
         s = self._iter_hist_start
 
-        h_curr = history[s]     if s < len(history) else {}
-        h_sub  = history[s + 1] if s + 1 < len(history) else {}
-        h_val  = history[s + 2] if s + 2 < len(history) else (history[-1] if history else {})
+        h_curr = history[s] if s < len(history) else {}
+        h_sub = history[s + 1] if s + 1 < len(history) else {}
+        h_val = history[s + 2] if s + 2 < len(history) else (history[-1] if history else {})
 
         pv_is_best = (self._pending_valset or {}).get("is_best_program", False)
         status = "BEST" if pv_is_best else "accepted"
@@ -175,18 +175,18 @@ class GEPAProgressCallback:
         if h_val and h_val is not h_sub:
             h_val["status"] = status
 
-        config_params   = h_val.get("config_params", {})
-        quality_scores  = h_val.get("quality_scores", [])
-        elapsed         = h_val.get("mean_elapsed_s", 0.0)
-        score_before    = h_curr.get("mean_score", 0.0)
-        score_after     = h_sub.get("mean_score", 0.0)
-        delta           = score_after - score_before
-        sign            = "+" if delta >= 0 else ""
+        config_params = h_val.get("config_params", {})
+        quality_scores = h_val.get("quality_scores", [])
+        elapsed = h_val.get("mean_elapsed_s", 0.0)
+        score_before = h_curr.get("mean_score", 0.0)
+        score_after = h_sub.get("mean_score", 0.0)
+        delta = score_after - score_before
+        sign = "+" if delta >= 0 else ""
 
-        pv        = self._pending_valset or {}
-        is_best   = pv.get("is_best_program", False)
-        val_ids   = pv.get("scores_by_val_id", {})
-        val_avg   = pv.get("average_score", 0.0)
+        pv = self._pending_valset or {}
+        is_best = pv.get("is_best_program", False)
+        val_ids = pv.get("scores_by_val_id", {})
+        val_avg = pv.get("average_score", 0.0)
 
         best_tag = "  [*** NEW BEST ***]" if is_best else ""
         print(self._bar(f"Iter {iteration}  ACCEPTED{best_tag}"))
@@ -201,24 +201,24 @@ class GEPAProgressCallback:
 
     def on_candidate_rejected(self, event: dict) -> None:
         iteration = event["iteration"]
-        history   = self._adapter.history_
-        s         = self._iter_hist_start
+        history = self._adapter.history_
+        s = self._iter_hist_start
 
-        h_curr = history[s]     if s < len(history) else {}
-        h_sub  = history[s + 1] if s + 1 < len(history) else (history[-1] if history else {})
+        h_curr = history[s] if s < len(history) else {}
+        h_sub = history[s + 1] if s + 1 < len(history) else (history[-1] if history else {})
 
         if h_curr:
             h_curr["status"] = "re-eval"
         if h_sub:
             h_sub["status"] = "rejected"
 
-        config_params  = h_sub.get("config_params", {})
+        config_params = h_sub.get("config_params", {})
         quality_scores = h_sub.get("quality_scores", [])
-        elapsed        = h_sub.get("mean_elapsed_s", 0.0)
-        score_before   = h_curr.get("mean_score", 0.0)
-        score_after    = h_sub.get("mean_score", 0.0)
-        delta          = score_after - score_before
-        sign           = "+" if delta >= 0 else ""
+        elapsed = h_sub.get("mean_elapsed_s", 0.0)
+        score_before = h_curr.get("mean_score", 0.0)
+        score_after = h_sub.get("mean_score", 0.0)
+        delta = score_after - score_before
+        sign = "+" if delta >= 0 else ""
 
         print(self._bar(f"Iter {iteration}  REJECTED"))
         print(f"  Config  : {self._fmt_config(config_params)}")
@@ -230,7 +230,7 @@ class GEPAProgressCallback:
         print()
 
     def on_optimization_end(self, event: dict) -> None:
-        total_iter  = event["total_iterations"]
+        total_iter = event["total_iterations"]
         total_calls = event["total_metric_calls"]
         print(self._bar("DONE"))
         print(f"  Iterations  : {total_iter}   Metric calls: {total_calls} / {self._max_calls}")
@@ -316,6 +316,7 @@ class HyperparamAdapter(SchedulingGEPAAdapter):
         Episode length forwarded to SchEnv (None → 10 * n default).
     seed : int | None
         RNG seed forwarded to agent.solve().
+
     """
 
     def __init__(
@@ -414,6 +415,7 @@ class GEPAAgent(Agent):
     interactions_log : str | Path | None
         If provided, all raw LLM prompt/response pairs are recorded and
         written to this path as a JSON file after training completes.
+
     """
 
     def __init__(
@@ -442,7 +444,7 @@ class GEPAAgent(Agent):
         if reflection_prompt is not None:
             self.reflection_prompt = reflection_prompt
         else:
-            from .classical_agents import SimulatedAnnealingAgent, GeneticAlgorithmAgent
+            from .classical_agents import GeneticAlgorithmAgent, SimulatedAnnealingAgent
             if base_agent_cls is SimulatedAnnealingAgent:
                 self.reflection_prompt = _SA_REFLECTION_PROMPT
             elif base_agent_cls is GeneticAlgorithmAgent:
@@ -487,7 +489,7 @@ class GEPAAgent(Agent):
         ) -> None:
             try:
                 interactions.append({
-                    "timestamp": start_time.astimezone(timezone.utc).isoformat(),
+                    "timestamp": start_time.astimezone(UTC).isoformat(),
                     "model": kwargs.get("model"),
                     "messages": kwargs.get("messages"),
                     "response": response_obj.choices[0].message.content,

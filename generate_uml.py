@@ -6,7 +6,6 @@ Uses ast module to parse Python files and graphviz to visualize.
 
 import ast
 from pathlib import Path
-from typing import Dict, List
 
 import graphviz
 
@@ -15,7 +14,7 @@ class PythonAnalyzer(ast.NodeVisitor):
     """Analyze Python files to extract class and method information."""
 
     def __init__(self):
-        self.classes: Dict[str, Dict] = {}
+        self.classes: dict[str, dict] = {}
         self.current_class = None
 
     def visit_ClassDef(self, node):
@@ -54,23 +53,23 @@ class PythonAnalyzer(ast.NodeVisitor):
         """Get the name from various node types."""
         if isinstance(node, ast.Name):
             return node.id
-        elif isinstance(node, ast.Attribute):
+        if isinstance(node, ast.Attribute):
             return node.attr
         return str(node)
 
 
-def collect_python_files(src_dir: str) -> List[Path]:
+def collect_python_files(src_dir: str) -> list[Path]:
     """Find all Python files in src directory."""
     src_path = Path(src_dir)
     return sorted(src_path.glob('**/*.py'))
 
 
-def analyze_python_files(files: List[Path]) -> Dict[str, Dict]:
+def analyze_python_files(files: list[Path]) -> dict[str, dict]:
     """Analyze all Python files and extract class information."""
     all_classes = {}
 
     for file_path in files:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with Path(file_path).open('r', encoding='utf-8') as f:
             try:
                 tree = ast.parse(f.read())
                 analyzer = PythonAnalyzer()
@@ -82,12 +81,12 @@ def analyze_python_files(files: List[Path]) -> Dict[str, Dict]:
     return all_classes
 
 
-def extract_relationships(files: List[Path], classes: Dict[str, Dict]) -> Dict[str, set]:
+def extract_relationships(files: list[Path], classes: dict[str, dict]) -> dict[str, set]:
     """Extract class relationships from type hints and instantiation patterns."""
     relationships = {class_name: set() for class_name in classes}
 
     for file_path in files:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with Path(file_path).open('r', encoding='utf-8') as f:
             try:
                 content = f.read()
                 tree = ast.parse(content)
@@ -134,7 +133,7 @@ def extract_relationships(files: List[Path], classes: Dict[str, Dict]) -> Dict[s
     return relationships
 
 
-def generate_graphviz_diagram(classes: Dict[str, Dict], relationships: Dict[str, set] | None = None) -> graphviz.Digraph:
+def generate_graphviz_diagram(classes: dict[str, dict], relationships: dict[str, set] | None = None) -> graphviz.Digraph:
     """Generate Graphviz UML diagram with proper styling."""
     dot = graphviz.Digraph(comment='Python UML Diagram', format='svg', engine='dot')
     dot.attr(rankdir='TB', splines='spline', overlap='false')

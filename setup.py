@@ -1,9 +1,9 @@
-from setuptools import Extension, setup
-from setuptools.command.build_ext import build_ext as _build_ext
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import numpy as np
+from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext as _build_ext
 
 
 class build_ext(_build_ext):
@@ -12,14 +12,13 @@ class build_ext(_build_ext):
     def build_extension(self, ext):
         """Override to capture and display pragma messages during compilation"""
         # Temporarily capture compiler output to display pragma messages
-        import subprocess
 
         # Get the compiler command that would be used
         sources = self.sources if hasattr(self, 'sources') else ext.sources
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"Compiling {ext.name}...")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         # Call parent build_extension
         super().build_extension(ext)
@@ -31,9 +30,9 @@ class build_ext(_build_ext):
         compiled_dir = Path(__file__).parent / "src" / "native_optimized" / "__compiled__"
         compiled_dir.mkdir(exist_ok=True)
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("Installing compiled extensions to __compiled__/")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         # Copy from build output to _compiled and remove from src/
         src_dir = Path(__file__).parent / "src"

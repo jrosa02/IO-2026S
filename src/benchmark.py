@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from .sch_env import EpisodeResult, SchEnv
 from .orlib_sch import SchInstance
+from .sch_env import EpisodeResult, SchEnv
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -74,6 +74,7 @@ class BenchmarkRunner:
         Episode length per instance (default: 10 * n from SchEnv).
     seed : int | None
         RNG seed used for every agent × instance run, enabling fair comparison.
+
     """
 
     def __init__(
@@ -110,6 +111,7 @@ class BenchmarkRunner:
         Returns
         -------
         dict[str, AgentBenchmarkResult]
+
         """
         benchmark_results: dict[str, AgentBenchmarkResult] = {}
 

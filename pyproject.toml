@@ -46,7 +46,7 @@ fix = true
 show-fixes = true
 
 [tool.ruff.lint]
-select = ["E", "F", "B", "I", "UP", "SIM", "RET", "RUF", "PL"]
+select = ["E", "F", "B", "I", "UP", "SIM", "RET", "RUF", "PL", "DOC", "D"]
 
 ignore = [
     # Conflicts with formatter or impractical rules

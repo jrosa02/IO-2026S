@@ -23,10 +23,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_HERE     = Path(__file__).parent
+_HERE = Path(__file__).parent
 _COMPILED = _HERE / "__compiled__"
 _SETUP_PY = _HERE.parent.parent / "setup.py"
-_SUFFIX   = sysconfig.get_config_var("EXT_SUFFIX")
+_SUFFIX = sysconfig.get_config_var("EXT_SUFFIX")
 
 
 def _load_module(so_name: str):
@@ -35,13 +35,13 @@ def _load_module(so_name: str):
         return None
     spec = importlib.util.spec_from_file_location(so_name, so)
     assert spec
-    mod  = importlib.util.module_from_spec(spec)
+    mod = importlib.util.module_from_spec(spec)
     assert spec.loader
     spec.loader.exec_module(mod)
     return mod
 
 
-_evaluate_mod  = _load_module("evaluate_opt")
+_evaluate_mod = _load_module("evaluate_opt")
 _crossover_mod = _load_module("crossover_opt")
 
 if _evaluate_mod is None or _crossover_mod is None:
@@ -51,7 +51,7 @@ if _evaluate_mod is None or _crossover_mod is None:
         cwd=str(_SETUP_PY.parent),
         check=True,
     )
-    _evaluate_mod  = _load_module("evaluate_opt")
+    _evaluate_mod = _load_module("evaluate_opt")
     _crossover_mod = _load_module("crossover_opt")
 
 if _evaluate_mod is None:
@@ -63,8 +63,8 @@ if _crossover_mod is None:
 # Public API — function references bound once at import time
 # ---------------------------------------------------------------------------
 
-evaluate            = _evaluate_mod.evaluate_opt
-evaluate_swap       = _evaluate_mod.evaluate_swap_opt
-evaluate_batch      = _evaluate_mod.evaluate_batch_opt
+evaluate = _evaluate_mod.evaluate_opt
+evaluate_swap = _evaluate_mod.evaluate_swap_opt
+evaluate_batch = _evaluate_mod.evaluate_batch_opt
 evaluate_batch_swap = _evaluate_mod.evaluate_batch_swap_opt
-batch_crossover     = _crossover_mod.batch_crossover_opt
+batch_crossover = _crossover_mod.batch_crossover_opt

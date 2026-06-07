@@ -13,7 +13,7 @@ import pytest
 # Add parent dir to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import load, SchEnv, Agent, RandomAgent, GreedyAgent
+from src import Agent, GreedyAgent, RandomAgent, SchEnv, load
 from src.sch_env import EpisodeResult
 
 
@@ -46,7 +46,6 @@ def test_agent_name_property():
 
     g = GreedyAgent()
     assert g.name == "GreedyAgent"
-
 
 
 def test_agent_repr():
@@ -105,6 +104,7 @@ def test_greedy_agent_better_than_random(dataset):
 
     # Greedy should generally find a better schedule
     assert r_greedy.best_cost <= r_random.best_cost
+
 
 def test_agent_train_noop():
     """Check that Agent.train() is a no-op for non-learning agents."""

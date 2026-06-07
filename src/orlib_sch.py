@@ -62,7 +62,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import math
 import urllib.request
 import warnings
 from collections.abc import Iterator, Sequence
@@ -73,7 +72,6 @@ from typing import NamedTuple
 import numpy as np
 
 from .native_optimized import evaluate
-from .native_optimized import evaluate_swap
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +106,7 @@ class SchInstance:
         Job data in original order.  ``jobs[i]`` corresponds to job i.
     sum_p : int
         Sum of all processing times (= total makespan of any permutation).
+
     """
 
     index: int
@@ -133,9 +132,11 @@ class SchInstance:
 
         d = floor(SUM_P * h),   h typically in {0.2, 0.4, 0.6, 0.8}
 
-        Parameters:
+        Parameters
+        ----------
         h : float
             Due-date tightness.  h=0 → all jobs tardy; h=1 → all jobs early.
+
         """
         if not 0.0 <= h <= 1.0:
             raise ValueError(f"h must be in [0, 1], got {h!r}.")
@@ -160,6 +161,7 @@ class SchInstance:
         -------
         int
             Total penalty  Σ_i [ a_i * max(0, d - C_i) + b_i * max(0, C_i - d) ]
+
         """
         d = int(self.sum_p * h)
         s = schedule if isinstance(schedule, np.ndarray) else np.asarray(schedule, dtype=np.int64)
@@ -228,6 +230,7 @@ class SchDataset:
     source : str
         Path or URL that was loaded.
     instances : list[SchInstance]
+
     """
 
     source: str
@@ -350,6 +353,7 @@ def load(source: str | Path) -> SchDataset:
     >>> ds = load("sch10.txt")
     >>> ds = load("https://people.brunel.ac.uk/~mastjjb/jeb/orlib/files/sch10.txt")
     >>> print(ds[0].summary())
+
     """
     src_str = str(source)
 

@@ -35,10 +35,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 def _run_tag(args) -> str:
     """Build a short, human-readable tag from the key run parameters."""
     dataset = Path(args.data).stem                          # sch10, sch100, …
-    agents  = args.agents.replace(",", "-")                 # sa-genetic, gepa-sa, …
-    h_str   = f"h{args.h}"                                  # h0.4
-    n_str   = f"n{args.n_instances}"                        # n5
-    s_str   = f"s{args.max_steps}"                          # s50
+    agents = args.agents.replace(",", "-")                 # sa-genetic, gepa-sa, …
+    h_str = f"h{args.h}"                                  # h0.4
+    n_str = f"n{args.n_instances}"                        # n5
+    s_str = f"s{args.max_steps}"                          # s50
 
     parts = [dataset, agents, h_str, n_str, s_str]
 
@@ -96,15 +96,15 @@ def build_agents(
     reflection_lm: str,
     interactions_log: str | None,
 ) -> dict:
-    from src.agent import RandomAgent, GreedyAgent
-    from src.classical_agents import SimulatedAnnealingAgent, GeneticAlgorithmAgent
-    from src.configs import SAConfig, GAConfig
+    from src.agent import GreedyAgent, RandomAgent
+    from src.classical_agents import GeneticAlgorithmAgent, SimulatedAnnealingAgent
+    from src.configs import GAConfig, SAConfig
     from src.gepa_agent import GEPAAgent
 
     mapping = {
-        "random":  ("Random",  RandomAgent()),
-        "greedy":  ("Greedy",  GreedyAgent()),
-        "sa":      ("SA",      SimulatedAnnealingAgent()),
+        "random":  ("Random", RandomAgent()),
+        "greedy":  ("Greedy", GreedyAgent()),
+        "sa":      ("SA", SimulatedAnnealingAgent()),
         "genetic": ("Genetic", GeneticAlgorithmAgent()),
         "gepa-sa": ("GEPA-SA", GEPAAgent(
             base_agent_cls=SimulatedAnnealingAgent,
@@ -138,9 +138,9 @@ def build_agents(
 def main():
     args = parse_args()
 
-    from src.orlib_sch import load
-    from src.benchmark import BenchmarkRunner
     import src.visualize as viz
+    from src.benchmark import BenchmarkRunner
+    from src.orlib_sch import load
 
     tag = _run_tag(args)
     out_dir = Path(args.out_dir) / tag

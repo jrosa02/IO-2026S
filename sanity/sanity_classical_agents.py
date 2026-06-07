@@ -12,15 +12,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import load, SchEnv
+from src import SchEnv, load
 from src.classical_agents import (
-    GeneticAlgorithmAgent,
     GAConfig,
+    GeneticAlgorithmAgent,
     SAConfig,
     SimulatedAnnealingAgent,
 )
 from src.sch_env import EpisodeResult
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

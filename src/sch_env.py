@@ -60,16 +60,15 @@ Usage
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
+
 import numpy as np
 from numba import njit
-from numpy.random import Generator
 
+from .native_optimized import evaluate_swap
 from .orlib_sch import SchInstance
-from .native_optimized import evaluate_swap, evaluate_batch_swap
 
 # ---------------------------------------------------------------------------
 # Action encoding helpers
@@ -108,6 +107,7 @@ class SchEnv:
     reward_shaping : bool
         If True (default), scale rewards by 1/initial_cost.
         If False, reward = raw cost improvement (integer).
+
     """
 
     # ------------------------------------------------------------------
@@ -178,6 +178,7 @@ class SchEnv:
         -------
         obs : np.ndarray  shape (obs_size,)
         info : dict
+
         """
         self._np_rng = np.random.default_rng(seed)
 
@@ -212,6 +213,7 @@ class SchEnv:
         terminated  : bool   - always False (no natural terminal state)
         truncated   : bool   - True when step budget is exhausted
         info        : dict
+
         """
         if self._done:
             raise RuntimeError("Call reset() before step().")
@@ -245,8 +247,8 @@ class SchEnv:
     # Action space helpers
     # ------------------------------------------------------------------
 
-    def action_space_samples(self, n:int = 1) -> np.ndarray|int:
-        samples =  self._np_rng.integers(0, self.n_actions, n)
+    def action_space_samples(self, n: int = 1) -> np.ndarray | int:
+        samples = self._np_rng.integers(0, self.n_actions, n)
         if n == 1:
             samples = samples[0]
         return samples
@@ -254,12 +256,13 @@ class SchEnv:
     @staticmethod
     @njit("(int64, int64)", cache=True)
     def _decode_action_formula(n: int, action: int) -> tuple:
-        """Numba-compiled O(1) decoder via quadratic formula.
+        """
+        Numba-compiled O(1) decoder via quadratic formula.
         Cumulative pairs before row i = i*(2n-i-1)/2.
         Solve i*(2n-i-1)/2 = action → i = ((2n-1) - sqrt((2n-1)²-8k)) / 2.
         """
-        i = int((2*n - 1 - np.sqrt((2*n - 1)**2 - 8*action)) / 2)
-        j = action - i*(2*n - i - 1)//2 + i + 1
+        i = int((2 * n - 1 - np.sqrt((2 * n - 1)**2 - 8 * action)) / 2)
+        j = action - i * (2 * n - i - 1) // 2 + i + 1
         return i, j
 
     def decode_action(self, action: int) -> tuple[int, int]:
@@ -395,6 +398,7 @@ def run_episode(
     Returns
     -------
     EpisodeResult
+
     """
     obs, info = env.reset(seed=seed, schedule=start_schedule)
     initial_cost = info["initial_cost"]
@@ -448,6 +452,7 @@ def run_episode(
 @dataclass
 class DatasetRunConfig:
     """Configuration for batch running episodes across a dataset."""
+
     h: float = 0.4
     max_steps: int | None = None
     seed: int | None = None
@@ -479,6 +484,7 @@ def run_dataset(
     -------
     >>> results = run_dataset(ds.instances, lambda env: env.action_space_sample)
     >>> avg_imp = sum(r.improvement_pct for r in results) / len(results)
+
     """
     if cfg is None:
         cfg = DatasetRunConfig()

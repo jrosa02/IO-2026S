@@ -12,6 +12,7 @@ Wymaga: weasyprint, markdown  (uv add weasyprint markdown)
 """
 
 from __future__ import annotations
+
 import re
 import sys
 import textwrap
@@ -199,6 +200,7 @@ p.math-display {
 # HTML wrapper
 # ---------------------------------------------------------------------------
 
+
 def wrap_html(title: str, body: str) -> str:
     return textwrap.dedent(f"""\
         <!DOCTYPE html>
@@ -218,47 +220,48 @@ def wrap_html(title: str, body: str) -> str:
 # Conversion
 # ---------------------------------------------------------------------------
 
+
 _LATEX_SUBS = [
-    (r"\\cdot",   "·"),
-    (r"\\times",  "×"),
-    (r"\\Delta",  "Δ"),
-    (r"\\delta",  "δ"),
-    (r"\\alpha",  "α"),
-    (r"\\beta",   "β"),
-    (r"\\gamma",  "γ"),
+    (r"\\cdot", "·"),
+    (r"\\times", "×"),
+    (r"\\Delta", "Δ"),
+    (r"\\delta", "δ"),
+    (r"\\alpha", "α"),
+    (r"\\beta", "β"),
+    (r"\\gamma", "γ"),
     (r"\\lambda", "λ"),
-    (r"\\mu",     "μ"),
-    (r"\\sigma",  "σ"),
-    (r"\\eta",    "η"),
-    (r"\\theta",  "θ"),
+    (r"\\mu", "μ"),
+    (r"\\sigma", "σ"),
+    (r"\\eta", "η"),
+    (r"\\theta", "θ"),
     (r"\\varphi", "φ"),
-    (r"\\phi",    "φ"),
-    (r"\\psi",    "ψ"),
-    (r"\\omega",  "ω"),
-    (r"\\pi",     "π"),
+    (r"\\phi", "φ"),
+    (r"\\psi", "ψ"),
+    (r"\\omega", "ω"),
+    (r"\\pi", "π"),
     (r"\\approx", "≈"),
-    (r"\\leq",    "≤"),
-    (r"\\geq",    "≥"),
-    (r"\\neq",    "≠"),
-    (r"\\pm",     "±"),
-    (r"\\,",      " "),  # narrow no-break space
-    (r"\\;",      " "),
-    (r"\\:",      " "),
-    (r"\\!",      ""),
-    (r"\\quad",   "  "),
+    (r"\\leq", "≤"),
+    (r"\\geq", "≥"),
+    (r"\\neq", "≠"),
+    (r"\\pm", "±"),
+    (r"\\,", " "),  # narrow no-break space
+    (r"\\;", " "),
+    (r"\\:", " "),
+    (r"\\!", ""),
+    (r"\\quad", "  "),
 ]
 
 
 def _latex_to_text(latex: str) -> str:
     s = latex.strip()
     s = re.sub(r"\\frac\{([^}]*)\}\{([^}]*)\}", r"(\1) / (\2)", s)
-    s = re.sub(r"\\text\{([^}]*)\}",             r"\1",           s)
-    s = re.sub(r"_\{([^}]*)\}",                  r"<sub>\1</sub>", s)
-    s = re.sub(r"_([a-zA-Z0-9])",                r"<sub>\1</sub>", s)
-    s = re.sub(r"\^\{\\circ\}",                  "°",              s)
-    s = re.sub(r"\^\\circ",                       "°",              s)
-    s = re.sub(r"\^\{([^}]*)\}",                 r"<sup>\1</sup>", s)
-    s = re.sub(r"\^([a-zA-Z0-9])",               r"<sup>\1</sup>", s)
+    s = re.sub(r"\\text\{([^}]*)\}", r"\1", s)
+    s = re.sub(r"_\{([^}]*)\}", r"<sub>\1</sub>", s)
+    s = re.sub(r"_([a-zA-Z0-9])", r"<sub>\1</sub>", s)
+    s = re.sub(r"\^\{\\circ\}", "°", s)
+    s = re.sub(r"\^\\circ", "°", s)
+    s = re.sub(r"\^\{([^}]*)\}", r"<sup>\1</sup>", s)
+    s = re.sub(r"\^([a-zA-Z0-9])", r"<sup>\1</sup>", s)
     for pattern, repl in _LATEX_SUBS:
         s = re.sub(pattern, repl, s)
     s = re.sub(r"\\[a-zA-Z]+", "", s)
@@ -275,10 +278,10 @@ def latex_to_html(md_text: str) -> str:
     def replace_inline(m: re.Match) -> str:
         return _latex_to_text(m.group(1))
 
-    md_text = re.sub(r"\$\$(.*?)\$\$",  replace_display, md_text, flags=re.DOTALL)
+    md_text = re.sub(r"\$\$(.*?)\$\$", replace_display, md_text, flags=re.DOTALL)
     md_text = re.sub(r"\\\[(.*?)\\\]", replace_display, md_text, flags=re.DOTALL)
     md_text = re.sub(r"\$([^\$\n]+?)\$", replace_inline, md_text)
-    md_text = re.sub(r"\\\((.*?)\\\)", replace_inline,  md_text)
+    md_text = re.sub(r"\\\((.*?)\\\)", replace_inline, md_text)
     return md_text
 
 
@@ -320,6 +323,7 @@ def convert(src: Path, dst: Path) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     if len(sys.argv) < 2:

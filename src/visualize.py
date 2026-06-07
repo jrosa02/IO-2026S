@@ -50,15 +50,15 @@ Usage
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
-import matplotlib.pyplot as plt
 import matplotlib.axes
 import matplotlib.patches as mpatches
-from matplotlib.patches import Rectangle
-from matplotlib.animation import FuncAnimation
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.animation import FuncAnimation
+from matplotlib.patches import Rectangle
 
 from src.benchmark import AgentBenchmarkResult
 
@@ -218,6 +218,7 @@ def plot_gantt_chart(
     -------
     fig : matplotlib.figure.Figure
     ax : matplotlib.axes.Axes
+
     """
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -249,7 +250,7 @@ def plot_gantt_chart(
 
 
 def plot_cost_breakdown(
-    results: "dict[str, AgentBenchmarkResult]",
+    results: dict[str, AgentBenchmarkResult],
     instance: SchInstance,
     h: float = 0.4,
     *,
@@ -291,6 +292,7 @@ def plot_cost_breakdown(
     -------
     fig : matplotlib.figure.Figure
     axes : list of matplotlib.axes.Axes
+
     """
     # ------------------------------------------------------------------
     # Aggregate per-job costs across agents
@@ -322,21 +324,21 @@ def plot_cost_breakdown(
     n_agents = len(results)
     job_ids = list(range(instance.n))
     mean_early = np.array([np.mean(job_data[j]["early"]) for j in job_ids])
-    std_early  = np.array([np.std(job_data[j]["early"])  for j in job_ids])
-    mean_late  = np.array([np.mean(job_data[j]["late"])  for j in job_ids])
-    std_late   = np.array([np.std(job_data[j]["late"])   for j in job_ids])
+    std_early = np.array([np.std(job_data[j]["early"]) for j in job_ids])
+    mean_late = np.array([np.mean(job_data[j]["late"]) for j in job_ids])
+    std_late = np.array([np.std(job_data[j]["late"]) for j in job_ids])
     mean_total = mean_early + mean_late
-    std_total  = np.sqrt(std_early**2 + std_late**2)
+    std_total = np.sqrt(std_early**2 + std_late**2)
 
     # Sort jobs by mean total cost descending
     order = np.argsort(mean_total)[::-1]
-    sorted_ids    = [job_ids[i] for i in order]
+    sorted_ids = [job_ids[i] for i in order]
     sorted_mean_e = mean_early[order]
-    sorted_std_e  = std_early[order]
+    sorted_std_e = std_early[order]
     sorted_mean_l = mean_late[order]
-    sorted_std_l  = std_late[order]
+    sorted_std_l = std_late[order]
     sorted_mean_t = mean_total[order]
-    sorted_std_t  = std_total[order]
+    sorted_std_t = std_total[order]
 
     # ------------------------------------------------------------------
     # Figure
@@ -413,7 +415,7 @@ def plot_cost_breakdown(
     # Quadrant guidelines at medians
     ax.axvline(float(np.median(mean_early)), color="#3498db", linewidth=0.8,
                linestyle="--", alpha=0.6, label="median earliness")
-    ax.axhline(float(np.median(mean_late)),  color="#e67e22", linewidth=0.8,
+    ax.axhline(float(np.median(mean_late)), color="#e67e22", linewidth=0.8,
                linestyle="--", alpha=0.6, label="median tardiness")
     ax.set_xlabel("Mean earliness cost", fontsize=10, fontweight="bold")
     ax.set_ylabel("Mean tardiness cost", fontsize=10, fontweight="bold")
@@ -448,7 +450,7 @@ def plot_cost_breakdown(
 
 
 def plot_schedule_comparison(
-    results: "dict[str, AgentBenchmarkResult]",
+    results: dict[str, AgentBenchmarkResult],
     instance: SchInstance,
     h: float = 0.4,
     *,
@@ -485,6 +487,7 @@ def plot_schedule_comparison(
     -------
     fig : matplotlib.figure.Figure
     axes : list of matplotlib.axes.Axes
+
     """
     best_agent_name = min(
         results,
@@ -572,6 +575,7 @@ def plot_training_curves(
     -------
     fig : matplotlib.figure.Figure
     axes : list of matplotlib.axes.Axes
+
     """
     fig, axes = plt.subplots(2, 2, figsize=figsize)
     axes = axes.flatten()
@@ -580,8 +584,7 @@ def plot_training_curves(
     def get_value(obj, key):
         if isinstance(obj, dict):
             return obj.get(key, [])
-        else:
-            return getattr(obj, key, [])
+        return getattr(obj, key, [])
 
     # --- Subplot 1: Loss curves ---
     ax = axes[0]
@@ -700,6 +703,7 @@ def animate_agent_actions(
     -------
     anim : matplotlib.animation.FuncAnimation
         The animation object (can be saved or displayed).
+
     """
     if not hasattr(agent, "actions") or not hasattr(agent, "initial_schedule"):
         raise ValueError("Agent must have .actions and .initial_schedule attributes")
@@ -808,6 +812,7 @@ def plot_convergence_curves(
     Returns
     -------
     plt.Figure
+
     """
     fig, ax = plt.subplots(figsize=figsize)
     cmap = plt.get_cmap("tab10")
@@ -871,6 +876,7 @@ def plot_agent_comparison(
     Returns
     -------
     plt.Figure
+
     """
     names = list(results.keys())
     means = [results[n].mean_improvement_pct for n in names]
@@ -922,8 +928,8 @@ def plot_agent_comparison(
 def plot_gepa_history(
     gepa_agent,
     *,
-    seed_result: "EpisodeResult | None" = None,
-    best_result: "EpisodeResult | None" = None,
+    seed_result: EpisodeResult | None = None,
+    best_result: EpisodeResult | None = None,
     figsize: tuple[float, float] = (16, 12),
     save_path: str | Path | None = None,
     show: bool = True,
@@ -958,6 +964,7 @@ def plot_gepa_history(
     -------
     fig : matplotlib.figure.Figure
     axes : list of matplotlib.axes.Axes
+
     """
     history = gepa_agent.history_
     if not history:
@@ -1107,14 +1114,14 @@ if __name__ == "__main__":
     sys.path.insert(0, ".")
 
     try:
+        from .agent import GreedyAgent
         from .orlib_sch import load
         from .sch_env import SchEnv
-        from .agent import GreedyAgent
     except ImportError:
         # Fallback for direct execution
+        from agent import GreedyAgent
         from orlib_sch import load
         from sch_env import SchEnv
-        from agent import GreedyAgent
 
     print("=" * 60)
     print("Visualization Demo")

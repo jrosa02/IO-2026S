@@ -44,7 +44,7 @@ def main() -> None:
     data = json.loads(Path(args.input).read_text(encoding="utf-8"))
 
     if args.out:
-        with open(args.out, "w", encoding="utf-8") as f:
+        with Path(args.out).open("w", encoding="utf-8") as f:
             render(data, file=f)
         print(f"Rendered {len(data)} interaction(s) to {args.out}")
     else:

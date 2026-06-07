@@ -46,6 +46,7 @@ class SchedulingGEPAAdapter:
     ----------
     seed_config : AgentConfig
         Fallback config used when the LLM response cannot be parsed.
+
     """
 
     # Required by the GEPAAdapter protocol — None means use the default LLM proposer.

@@ -15,11 +15,11 @@ Notes
 - Override ``construct()`` for constructive agents that build an initial schedule.
 - Override ``train()/save()/load()`` for learning agents (e.g. PPO).
 - ``solve()`` is concrete and orchestrates a full episode via :func:`run_episode`.
+
 """
 
 from __future__ import annotations
 
-import random
 from abc import ABC
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -72,6 +72,7 @@ class Agent(ABC):
         -------
         int
             Action index in ``[0, n_actions)``.
+
         """
         raise NotImplementedError(f"{self.name}.act() is not implemented")
 
@@ -89,6 +90,7 @@ class Agent(ABC):
         list[int] | None
             A permutation of ``range(instance.n)``, or ``None`` to let the
             environment use a random permutation.
+
         """
         return None
 
@@ -138,6 +140,7 @@ class Agent(ABC):
         Returns
         -------
         EpisodeResult
+
         """
         start_schedule = self.construct(env.instance)
         env.reset(seed=seed, schedule=start_schedule)

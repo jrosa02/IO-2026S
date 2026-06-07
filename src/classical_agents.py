@@ -23,18 +23,16 @@ Both agents subclass :class:`~agent.Agent` and store:
 from __future__ import annotations
 
 import math
-import random
+
 import matplotlib.pyplot as plt
 import numpy as np
-from numba import njit
 from numpy.random import Generator
 
 from .agent import Agent
 from .configs import GAConfig, SAConfig
 from .native_optimized import batch_crossover as _batch_crossover_opt
 from .native_optimized import evaluate_batch_swap as _evaluate_batch_swap
-from .sch_env import SchEnv, EpisodeResult
-
+from .sch_env import EpisodeResult, SchEnv
 
 # ---------------------------------------------------------------------------
 # Simulated Annealing
@@ -68,10 +66,10 @@ class SimulatedAnnealingAgent(Agent):
         initial_cost = env.current_cost
         current_cost = initial_cost
         total_reward = 0.0
-        temperatures = np.ndarray((env.max_steps))
+        temperatures = np.ndarray(env.max_steps)
 
         inst = env.instance
-        d    = int(inst.sum_p * env.h)
+        d = int(inst.sum_p * env.h)
         p, a, b = inst.p_array, inst.a_array, inst.b_array
         _I = np.empty(4, dtype=np.int64)
         _J = np.empty(4, dtype=np.int64)
@@ -245,8 +243,7 @@ class GeneticAlgorithmAgent(Agent):
             total_reward += reward
 
             current = env.current_schedule
-            if env.current_cost < best_cost_so_far:
-                best_cost_so_far = env.current_cost
+            best_cost_so_far = min(best_cost_so_far, env.current_cost)
             self.cost_history.append(best_cost_so_far)
 
         # ------------------------------------------------------------------
