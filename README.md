@@ -109,7 +109,6 @@ uv run ruff format src/ sanity/
 | **ConstructiveRandomAgent** | Constructive | Heuristic sort + random swaps |
 | **SimulatedAnnealingAgent** | Classical | Oscillating temperature schedule |
 | **GeneticAlgorithmAgent** | Classical | OX crossover, re-optimization every N steps |
-| **PPOAgent** | Learning | Actor-critic (stub) |
 | **GEPAAgent** | Meta | LLM hyperparameter evolution (stub) |
 
 ## Project Structure

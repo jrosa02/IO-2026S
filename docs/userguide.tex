@@ -1,0 +1,454 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+% \usepackage[polish]{babel}  % wymaga texlive-lang-polish
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{lmodern}
+\usepackage{parskip}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black,
+    citecolor=blue!60!black,
+}
+
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codecomment}{RGB}{100,100,100}
+\definecolor{codestring}{RGB}{0,130,0}
+\definecolor{codekeyword}{RGB}{0,0,180}
+
+\lstdefinestyle{bash}{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    commentstyle=\color{codecomment},
+    keywordstyle=\color{codekeyword},
+    stringstyle=\color{codestring},
+    breaklines=true,
+    frame=single,
+    framerule=0.4pt,
+    rulecolor=\color{gray!50},
+    xleftmargin=6pt,
+    xrightmargin=6pt,
+    aboveskip=6pt,
+    belowskip=6pt,
+}
+\lstset{style=bash}
+
+\titleformat{\section}{\large\bfseries}{}{0pt}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{}{0pt}{}
+
+\title{\textbf{io-2026s --- Instrukcja użytkownika}\\[4pt]
+    \large Harmonogramowanie na jednej maszynie z optymalizacją hiperparametrów przez LLM}
+\author{Karolina Piotrowska, Jan Rosa}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ---------------------------------------------------------------------------
+\section{Przegląd}
+% ---------------------------------------------------------------------------
+
+\textbf{io-2026s} stosuje duże modele językowe (LLM) oraz klasyczne metaheurystyki
+do rozwiązywania \emph{problemu harmonogramowania na jednej maszynie ze wspólnym
+terminem realizacji} (instancje ORLib \texttt{sch*}).
+Agenty przeszukują przestrzeń permutacji zadań, minimalizując łączny ważony
+koszt zbyt wczesnego i zbyt późnego zakończenia:
+
+\[
+  C(\pi) = \sum_i \bigl[ a_i \cdot \max(0,\, d - C_i) + b_i \cdot \max(0,\, C_i - d) \bigr]
+\]
+
+gdzie $d = \lfloor h \cdot \sum p_i \rfloor$ jest wspólnym terminem realizacji
+sterowanym współczynnikiem szczelności $h$, a $C_i$ to czas ukończenia zadania~$i$.
+
+% ---------------------------------------------------------------------------
+\section{Instalacja}
+% ---------------------------------------------------------------------------
+
+\subsection{Wymagania}
+
+\begin{itemize}[noitemsep]
+  \item Python 3.10+
+  \item Menedżer pakietów \texttt{uv} --- \url{https://docs.astral.sh/uv/}
+  \item GCC (do kompilacji rozszerzeń C)
+  \item Ollama (tylko dla agentów GEPA) --- \url{https://ollama.com/}
+\end{itemize}
+
+\subsection{Konfiguracja środowiska}
+
+\begin{lstlisting}[language=bash]
+# Sklonuj repozytorium, zainstaluj zaleznosci i skompiluj rozszerzenia C
+uv sync
+\end{lstlisting}
+
+Polecenie \texttt{uv sync} instaluje pakiety Pythona, buduje rozszerzenia C
+(\texttt{evaluate\_opt.c}, \texttt{crossover\_opt.c}) i zapisuje skompilowane
+pliki \texttt{.so} w katalogu
+\texttt{src/native\_optimized/\_\_compiled\_\_/}.
+
+% ---------------------------------------------------------------------------
+\section{Główny skrypt benchmarkowy --- \texttt{main.py}}
+% ---------------------------------------------------------------------------
+
+\subsection{Podstawowe wywołanie}
+
+\begin{lstlisting}[language=bash]
+python main.py [OPCJE]
+\end{lstlisting}
+
+Uruchamia wybrane agenty na zbiorze danych, drukuje tabelę wyników ASCII,
+zapisuje \texttt{benchmark.csv} i (o ile nie podano \texttt{--no-plots})
+generuje wykresy zbieżności oraz porównawcze.
+Wszystkie wyniki trafiają do katalogu \texttt{results/} w podkatalogu
+oznaczonym znacznikiem czasowym.
+
+\subsection{Parametry}
+
+\begin{longtable}{@{}p{4.5cm} p{2.2cm} p{2.2cm} p{6.3cm}@{}}
+\toprule
+\textbf{Flaga} & \textbf{Typ} & \textbf{Domyślnie} & \textbf{Opis} \\
+\midrule
+\endhead
+
+\texttt{--data} & ścieżka & \texttt{data/sch10.txt} &
+    Plik zbioru danych ORLib. Dostępne pliki: \texttt{sch10}, \texttt{sch20},
+    \texttt{sch50}, \texttt{sch100}, \texttt{sch200}, \texttt{sch500},
+    \texttt{sch1000}, \texttt{schpascal}. \\[4pt]
+
+\texttt{--n-instances} & int & 5 &
+    Liczba instancji problemu do zbenchmarkowania
+    (pobierane od początku zbioru danych). \\[4pt]
+
+\texttt{--h} & float & 0.4 &
+    Współczynnik szczelności terminu realizacji. Mniejsze wartości
+    utrudniają problem (większość zadań spóźniona), większe go upraszczają.
+    Typowe wartości ORLib: 0.2, 0.4, 0.6, 0.8. \\[4pt]
+
+\texttt{--max-steps} & int & 50 &
+    Długość epizodu (liczba ruchów zamiany) dla agentów iteracyjnych.
+    Podczas treningu GEPA stosowana jest domyślna wartość $10 \times n$,
+    gdy parametr nie jest ustawiony. \\[4pt]
+
+\texttt{--seed} & int & 42 &
+    Ziarno generatora liczb losowych (dla powtarzalności wyników). \\[4pt]
+
+\texttt{--out-dir} & ścieżka & \texttt{results} &
+    Katalog wyjściowy. Automatycznie tworzony jest podkatalog ze znacznikiem,
+    np.\ \texttt{results/sch10\_sa-genetic\_h0.4\_n5\_s50\_20260607\_120000/}. \\[4pt]
+
+\texttt{--no-plots} & flaga & wył. &
+    Pomija generowanie wykresów matplotlib.
+    Przydatne w środowiskach bez wyświetlacza lub w CI. \\[4pt]
+
+\texttt{--agents} & string & \texttt{random,greedy,sa,genetic} &
+    Lista agentów rozdzielona przecinkami. Dostępne klucze: \texttt{random},
+    \texttt{greedy}, \texttt{sa}, \texttt{genetic}, \texttt{gepa-sa},
+    \texttt{gepa-ga}. \\[4pt]
+
+\texttt{--train-instances} & int & 3 &
+    \textit{(tylko GEPA)} Liczba instancji używanych podczas przeszukiwania
+    hiperparametrów przez GEPA. Odrębny zbiór od zestawu benchmarkowego. \\[4pt]
+
+\texttt{--max-metric-calls} & int & 50 &
+    \textit{(tylko GEPA)} Łączny budżet ewaluacji optymalizatora GEPA
+    (zlicza każde uruchomienie agent$\times$instancja). \\[4pt]
+
+\texttt{--reflection-lm} & string & \texttt{ollama/qwen3:4b} &
+    \textit{(tylko GEPA)} Identyfikator modelu LiteLLM używanego przez LLM
+    do refleksji. Można użyć dowolnego modelu Ollama,
+    np.\ \texttt{ollama/gemma4:e2b}. \\[4pt]
+
+\texttt{--interactions-log} & ścieżka & \textit{brak} &
+    \textit{(tylko GEPA)} Jeśli podano, wszystkie surowe pary prompt/odpowiedź
+    LLM są zapisywane do tego pliku JSON po zakończeniu treningu.
+    Sama nazwa pliku (bez katalogu) umieszcza go w oznaczonym podkatalogu
+    wyjściowym. \\[4pt]
+
+\texttt{-v / --verbose} & flaga & wył. &
+    Wyświetla postęp dla każdej instancji podczas benchmarkowania. \\
+
+\bottomrule
+\end{longtable}
+
+\subsection{Przykładowe wywołania}
+
+\begin{lstlisting}[language=bash]
+# Szybki test: wszystkie klasyczne agenty na instancjach 10-zadaniowych
+python main.py --agents random,greedy,sa,genetic --data data/sch10.txt
+
+# Pelny benchmark z GEPA, bez wykresow
+python main.py \
+    --agents gepa-ga,genetic,gepa-sa,sa \
+    --data data/sch1000.txt \
+    --n-instances 5 \
+    --train-instances 5 \
+    --max-metric-calls 100 \
+    --reflection-lm ollama/qwen3:4b-instruct-2507-q4_K_M \
+    --interactions-log interactions.json \
+    --no-plots
+
+# Dokladna reprodukcja eksperymentu
+python main.py --seed 0 --h 0.6 --max-steps 200
+\end{lstlisting}
+
+\subsection{Struktura katalogu wynikowego}
+
+\begin{lstlisting}
+results/<znacznik>/
+    benchmark.csv              # srednia/odch. std poprawy% dla kazdego agenta
+    gepa_history_GEPA_GA.png   # wykres wyniku GEPA w kolejnych iteracjach
+    gepa_history_GEPA_SA.png
+    convergence.png            # koszt w funkcji kroku dla kazdego agenta
+    agent_comparison.png       # wykres slupkowy wynikow koncowych
+    cost_breakdown.png         # wczesnosc vs. spoznienie
+    schedule_comparison.png    # harmonogram przed i po optymalizacji (Gantt)
+    interactions.json          # surowe prompty LLM (jesli zadan)
+\end{lstlisting}
+
+% ---------------------------------------------------------------------------
+\section{Dostępne agenty}
+% ---------------------------------------------------------------------------
+
+\begin{longtable}{@{}p{3.8cm} p{2.5cm} p{8.2cm}@{}}
+\toprule
+\textbf{Agent} & \textbf{Klucz CLI} & \textbf{Opis} \\
+\midrule
+\endhead
+RandomAgent        & \texttt{random}  & Losowy wybór zamiany na każdym kroku. \\[4pt]
+GreedyAgent        & \texttt{greedy}  & Wyczerpujące przeszukiwanie 1-krokowe;
+                                        wybiera najlepszą pojedynczą zamianę. \\[4pt]
+SimulatedAnnealing & \texttt{sa}      & Wyżarzanie symulowane z oscylującym
+                                        harmonogramem temperatury:
+                                        $T(t) = T_0 e^{-bt} + c\sin^2(t/d)$.
+                                        Hiperparametry: $T_0$, $b$, $c$, $d$, $T_{\min}$. \\[4pt]
+GeneticAlgorithm   & \texttt{genetic} & Krzyżowanie OX z elityzmem.
+                                        Ponowna optymalizacja co
+                                        \texttt{reoptimize\_every} kroków.
+                                        Hiperparametry: rozmiar populacji,
+                                        liczba pokoleń, współczynnik mutacji,
+                                        rozmiar elity. \\[4pt]
+GEPA-SA            & \texttt{gepa-sa} & Używa GEPA (przeszukiwanie stylem
+                                        bayesowskim sterowane przez LLM) do
+                                        znalezienia optymalnych hiperparametrów SA,
+                                        a następnie uruchamia SA z tymi parametrami. \\[4pt]
+GEPA-GA            & \texttt{gepa-ga} & Analogicznie jak wyżej, lecz dla
+                                        hiperparametrów GA. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Działanie agenta GEPA}
+
+GEPA ocenia kandydackie konfiguracje hiperparametrów, uruchamiając bazowego
+agenta na podzbiorze treningowym i raportując procentową poprawę.
+Po każdej ewaluacji LLM proponuje udoskonaloną konfigurację.
+Konsola drukuje jeden blok na iterację GEPA:
+
+\begin{lstlisting}
+=== Iter 1  ACCEPTED  [*** NEW BEST ***]  ========================
+  Config  : population_size=50  generations=5  mutation_rate=0.1 ...
+> SCORE  : 0.415  (D+0.096 vs curr-prog)  [GEPA optimises this]
+  Quality : improv%  [61.9%  71.4%  63.0%  36.6%  61.1%]  mean=58.8%
+  Valset  : composite avg 0.393  [0.422  0.522  0.434  0.166  0.421]
+  Time    : 0.09 s/run   Calls: 16 / 100
+==================================================================
+\end{lstlisting}
+
+\textbf{SCORE} (złożony = jakość $-$ kara za czas) jest miarą optymalizowaną
+przez GEPA; \textbf{Quality} pokazuje surowe procenty poprawy dla każdej instancji.
+
+% ---------------------------------------------------------------------------
+\section{Przeszukiwanie wielu modeli --- \texttt{run\_sweep.py}}
+% ---------------------------------------------------------------------------
+
+Uruchamia \texttt{main.py} sekwencyjnie dla każdego modelu z zakodowanej listy,
+najpierw sprawdza dostępność w Ollama, przekierowuje wyjście do pliku logu
+i drukuje tabelę podsumowującą.
+
+\begin{lstlisting}[language=bash]
+uv run python run_sweep.py
+\end{lstlisting}
+
+Edytuj górną część pliku \texttt{run\_sweep.py}, aby skonfigurować przeszukiwanie:
+
+\begin{lstlisting}[language=Python]
+MODELS = [
+    "ollama/qwen3:4b-instruct-2507-q4_K_M",
+    "ollama/gemma4:e2b",
+    "ollama/phi4-mini-reasoning:latest",
+    "ollama/granite4:1b-h-q8_0",
+]
+
+BASE_ARGS = {
+    "--agents":           "gepa-ga,genetic,gepa-sa,sa",
+    "--data":             "data/sch1000.txt",
+    "--train-instances":  "5",
+    "--max-metric-calls": "100",
+    "--interactions-log": "interactions.json",
+}
+\end{lstlisting}
+
+Pliki logów są zapisywane do
+\texttt{results/sweep\_<model>\_<znacznik>.log}.
+Przeszukiwanie kontynuuje działanie nawet w przypadku błędu modelu;
+podsumowanie końcowe pokazuje \texttt{OK}, \texttt{FAILED} lub
+\texttt{SKIPPED (not installed)} dla każdego modelu.
+
+% ---------------------------------------------------------------------------
+\section{Inspektor interakcji z LLM --- \texttt{render\_interactions.py}}
+% ---------------------------------------------------------------------------
+
+Renderuje surowy JSON wyprodukowany przez \texttt{--interactions-log}
+do czytelnego zestawienia promptów i odpowiedzi.
+
+\begin{lstlisting}[language=bash]
+# Wyswietl w terminalu
+python render_interactions.py results/<znacznik>/interactions.json
+
+# Zapisz do pliku tekstowego
+python render_interactions.py results/<znacznik>/interactions.json \
+    --out results/<znacznik>/interactions.txt
+\end{lstlisting}
+
+\begin{longtable}{@{}p{4.0cm} p{10.0cm}@{}}
+\toprule
+\textbf{Argument} & \textbf{Opis} \\
+\midrule
+\endhead
+\texttt{input} (pozycyjny) & Ścieżka do pliku \texttt{interactions.json}. \\[4pt]
+\texttt{--out SCIEZKA}     & Zapisuje wyrenderowany tekst do podanej ścieżki
+                             zamiast na standardowe wyjście. \\
+\bottomrule
+\end{longtable}
+
+Każdy blok interakcji zawiera znacznik czasu, nazwę modelu, opóźnienie,
+pełny prompt (z szablonem refleksji GEPA, bieżącą konfiguracją i wynikami
+ewaluacji) oraz surową odpowiedź JSON modelu.
+
+% ---------------------------------------------------------------------------
+\section{Generator dokumentacji --- \texttt{build\_docs.sh}}
+% ---------------------------------------------------------------------------
+
+Buduje referencję API w formacie HTML z wyszukiwarką oraz tę instrukcję
+użytkownika w formacie PDF.
+
+\begin{lstlisting}[language=bash]
+./build_docs.sh
+\end{lstlisting}
+
+Wyniki:
+\begin{itemize}[noitemsep]
+  \item \texttt{docs/\_build/html/index.html} --- HTML Sphinxa z pełnotekstowym
+        wyszukiwaniem (motyw Furo).
+  \item \texttt{docs/\_build/io-2026s-api.pdf} --- PDF referencji API przez
+        LaTeX.
+  \item \texttt{docs/\_build/io-2026s-userguide.pdf} --- Niniejsza instrukcja
+        użytkownika.
+\end{itemize}
+
+Skrypt uruchamia trzy kompilacje Sphinxa (HTML, jednostronicowy HTML, LaTeX)
+oraz osobną kompilację \texttt{pdflatex} dla tej instrukcji.
+
+% ---------------------------------------------------------------------------
+\section{Generator diagramów UML --- \texttt{generate\_uml.py}}
+% ---------------------------------------------------------------------------
+
+Generuje diagram klas UML z pakietu \texttt{src/} przy użyciu biblioteki
+\texttt{graphviz}.
+
+\begin{lstlisting}[language=bash]
+uv run python generate_uml.py
+\end{lstlisting}
+
+Parsuje wszystkie pliki \texttt{.py} w \texttt{src/} za pomocą modułu
+\texttt{ast}, wyodrębnia hierarchie klas i sygnatury metod, a następnie
+zapisuje \texttt{uml\_diagram.png} (oraz źródło \texttt{.gv}) w katalogu
+głównym projektu.
+
+% ---------------------------------------------------------------------------
+\section{Profilowanie}
+% ---------------------------------------------------------------------------
+
+\begin{lstlisting}[language=bash]
+# Szczegolowy profil wywolan -> wykres plomienia HTML
+uv run pyinstrument -r html -o logs.html \
+    main.py --agents sa,genetic --data data/sch1000.txt --max-steps 10000
+
+# Profilowanie probkujace (niski narzut) -> wykres plomienia SVG
+uv run py-spy record -r 500 -o profile.svg -- \
+    python main.py --agents genetic --data data/sch1000.txt --max-steps 20000
+\end{lstlisting}
+
+Używaj \texttt{pyinstrument} do szczegółowej analizy wywołań;
+\texttt{py-spy} do profilowania czasu rzeczywistego bez modyfikowania kodu źródłowego.
+
+% ---------------------------------------------------------------------------
+\section{Testy}
+% ---------------------------------------------------------------------------
+
+\begin{lstlisting}[language=bash]
+# Uruchom wszystkie testy (ok. 2 s)
+python -m pytest sanity/ -v
+
+# Jeden plik
+python -m pytest sanity/sanity_classical_agents.py -v
+
+# Jeden test
+python -m pytest sanity/sanity_agent.py::test_greedy_agent_solve -v
+\end{lstlisting}
+
+Testy korzystają z \texttt{data/sch10.txt} (10 zadań) z małą liczbą kroków
+(20--30) dla zachowania szybkości. Cztery zestawy: poprawność środowiska,
+interfejs agenta, runner benchmarkowy oraz poprawność SA/GA.
+
+% ---------------------------------------------------------------------------
+\section{Jakość kodu}
+% ---------------------------------------------------------------------------
+
+\begin{lstlisting}[language=bash]
+# Lintowanie (z automatycznym naprawianiem)
+uv run ruff check src/ sanity/
+
+# Formatowanie
+uv run ruff format src/ sanity/
+\end{lstlisting}
+
+Ruff jest skonfigurowany w \texttt{pyproject.toml} z wymuszaniem docstringów
+w stylu NumPy (reguły \texttt{D}/\texttt{DOC}), bug-bear, pylint oraz
+sortowaniem importów.
+
+% ---------------------------------------------------------------------------
+\section{Częste problemy}
+% ---------------------------------------------------------------------------
+
+\begin{description}[style=nextline]
+  \item[Rozszerzenia C nie kompilują się]
+    Upewnij się, że GCC jest zainstalowany (\texttt{gcc --version}).
+    Na Ubuntu: \texttt{sudo apt-get install build-essential}.
+    Następnie ponownie uruchom \texttt{uv sync}.
+
+  \item[GEPA zawiesza się / brak odpowiedzi Ollama]
+    Uruchom \texttt{ollama list}, aby sprawdzić, czy model jest pobrany.
+    \texttt{run\_sweep.py} sprawdza dostępność automatycznie.
+
+  \item[Wyjście podprocesu zawiesza się w \texttt{run\_sweep.py}]
+    \texttt{main.py} jest wywoływany z \texttt{python -u} (niebuforowane),
+    co zapewnia strumieniowanie linii po linii --- jest to już zawarte w skrypcie.
+
+  \item[Testy nie mogą znaleźć importów]
+    Aktywuj środowisko wirtualne:
+    \texttt{source .venv/bin/activate} przed uruchomieniem \texttt{pytest}.
+\end{description}
+
+\end{document}

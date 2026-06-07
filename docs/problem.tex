@@ -1,0 +1,408 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{lmodern}
+\usepackage{parskip}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{graphicx}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black,
+    citecolor=blue!60!black,
+}
+
+\titleformat{\section}{\large\bfseries}{}{0pt}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{}{0pt}{}
+
+\title{\textbf{Harmonogramowanie na jednej maszynie ze wspólnym terminem realizacji}\\[4pt]
+    \large Cel projektu, sformułowanie problemu i metody rozwiązania}
+\author{Karolina Piotrowska, Jan Rosa}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ---------------------------------------------------------------------------
+\section{Cel projektu}
+% ---------------------------------------------------------------------------
+
+Celem projektu \textbf{io-2026s} jest zbadanie, czy duże modele językowe (LLM)
+mogą skutecznie automatyzować dobór hiperparametrów metaheurystyk stosowanych
+do rozwiązywania kombinatorycznych problemów optymalizacyjnych.
+
+Jako dziedzinę testową wybrano \emph{problem harmonogramowania na jednej
+maszynie ze wspólnym terminem realizacji} (ang.\ \emph{common due date
+single-machine scheduling}), ponieważ:
+\begin{itemize}
+  \item jest dobrze zbadany i posiada publicznie dostępne instancje
+        benchmarkowe (biblioteka ORLib),
+  \item jakość rozwiązania silnie zależy od właściwego doboru hiperparametrów
+        metaheurystyki (co czyni go dobrym poligonem dla automatycznej
+        optymalizacji hiperparametrów),
+  \item instancje różnych rozmiarów ($n = 10, \ldots, 1000$) pozwalają ocenić
+        skalowalność metod.
+\end{itemize}
+
+Projekt porównuje cztery podejścia:
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Agenty bazowe} — losowy i zachłanny, stanowiące punkt odniesienia.
+  \item \textbf{Klasyczne metaheurystyki} — wyżarzanie symulowane (SA)
+        i algorytm genetyczny (GA) z ręcznie dobranymi hiperparametrami.
+  \item \textbf{GEPA-SA / GEPA-GA} — te same metaheurystyki, lecz z
+        hiperparametrami dobieranymi automatycznie przez framework GEPA
+        sterowany przez LLM.
+\end{enumerate}
+
+% ---------------------------------------------------------------------------
+\section{Sformułowanie problemu}
+% ---------------------------------------------------------------------------
+
+\subsection{Problem harmonogramowania ze wspólnym terminem realizacji}
+
+Dane jest $n$ zadań, które muszą zostać wykonane na jednej maszynie
+(bez możliwości przerywania).
+Każde zadanie $i \in \{1, \ldots, n\}$ charakteryzuje się:
+
+\begin{itemize}[noitemsep]
+  \item $p_i > 0$ — deterministyczny czas przetwarzania,
+  \item $a_i \geq 0$ — waga kary za \emph{zbyt wczesne} ukończenie,
+  \item $b_i \geq 0$ — waga kary za \emph{zbyt późne} ukończenie.
+\end{itemize}
+
+Wszystkie zadania mają jeden wspólny termin realizacji:
+\begin{equation}
+  d = \left\lfloor h \cdot \sum_{i=1}^{n} p_i \right\rfloor,
+  \label{eq:due_date}
+\end{equation}
+gdzie $h \in (0,1)$ jest \emph{współczynnikiem szczelności}.
+Małe wartości $h$ (np.\ $0{,}2$) oznaczają bardzo napięty termin —
+większość zadań jest spóźniona; duże wartości $h$ (np.\ $0{,}8$) dają
+termin luźny — większość zadań kończy się zbyt wcześnie.
+
+\subsection{Funkcja celu}
+
+Szukamy permutacji $\pi$ zbioru zadań minimalizującej łączną ważoną karę
+za wczesność i spóźnienie:
+\begin{equation}
+  \min_{\pi} \; C(\pi) = \sum_{i=1}^{n}
+    \Bigl[ a_{\pi(i)} \cdot \max\!\bigl(0,\; d - C_{\pi(i)}\bigr)
+         + b_{\pi(i)} \cdot \max\!\bigl(0,\; C_{\pi(i)} - d\bigr) \Bigr],
+  \label{eq:objective}
+\end{equation}
+gdzie $C_{\pi(i)} = \sum_{j=1}^{i} p_{\pi(j)}$ jest czasem ukończenia
+$i$-tego zadania w kolejności $\pi$.
+
+Problem należy do klasy \textbf{NP-trudnych}~— dla dowolnej permutacji nie
+istnieje wzór zamkniętej postaci optymalnego rozwiązania, wobec czego
+konieczne jest przeszukiwanie przestrzeni permutacji.
+
+\subsection{Instancje benchmarkowe (ORLib)}
+
+Projekt korzysta z publicznie dostępnych instancji opracowanych przez
+Biskupa i Feldmanna~\cite{biskup1998}:
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Plik} & \textbf{Liczba zadań} & \textbf{Rozmiar (KB)} \\
+\midrule
+\texttt{sch10}    &    10 & $<1$ \\
+\texttt{sch20}    &    20 & $<1$ \\
+\texttt{sch50}    &    50 &  $\sim$1 \\
+\texttt{sch100}   &   100 &  $\sim$5 \\
+\texttt{sch200}   &   200 & $\sim$15 \\
+\texttt{sch500}   &   500 & $\sim$50 \\
+\texttt{sch1000}  &  1000 & $\sim$200 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Każdy plik zawiera 10 instancji problemowych.
+Dla każdej instancji zdefiniowano 4 warianty terminu realizacji
+($h \in \{0{,}2;\; 0{,}4;\; 0{,}6;\; 0{,}8\}$),
+co daje łącznie 280 instancji benchmarkowych.
+Najlepsze znane górne ograniczenia są podane w oryginalnej pracy.
+
+% ---------------------------------------------------------------------------
+\section{Opis rozwiązania}
+% ---------------------------------------------------------------------------
+
+\subsection{Środowisko i reprezentacja stanu}
+
+Rozwiązanie jest reprezentowane jako permutacja
+$\pi = (\pi(1), \pi(2), \ldots, \pi(n))$ zadań.
+Agent operuje w środowisku \texttt{SchEnv} wzorowanym na Gym OpenAI:
+
+\begin{description}[style=nextline, leftmargin=2.5cm]
+  \item[\normalfont\textit{Stan}]
+    Bieżąca permutacja zadań wraz ze skalarnymi sygnałami kontekstowymi:
+    znormalizowany koszt bieżący, użyty ułamek budżetu kroków i współczynnik~$h$.
+    Wektor obserwacji ma długość $3n + 3$.
+
+  \item[\normalfont\textit{Akcja}]
+    Wybór pary zadań $(i, j)$ z $i < j$ i zamiana ich pozycji w permutacji.
+    Przestrzeń akcji ma rozmiar $\binom{n}{2}$.
+
+  \item[\normalfont\textit{Nagroda}]
+    \[
+      r_t = \frac{C(\pi_t) - C(\pi_{t+1})}{C(\pi_0)},
+    \]
+    czyli znormalizowana poprawa kosztu w jednym kroku.
+    Nagroda jest dodatnia, gdy zamiana poprawia harmonogram.
+\end{description}
+
+Agent wykonuje co najwyżej \texttt{max\_steps} kroków w jednym epizodzie.
+
+\subsection{Inicjalizacja zachłanna}
+
+Przed uruchomieniem przeszukiwania każdy agent inicjalizuje harmonogram
+za pomocą prostej heurystyki zachłannej: zadania są sortowane rosnąco według
+ilorazu $p_i / (a_i + b_i)$, co zapewnia sensowny punkt startowy.
+
+% ---------------------------------------------------------------------------
+\section{Metody rozwiązania}
+% ---------------------------------------------------------------------------
+
+\subsection{Agent losowy (Random)}
+
+Jako dolny punkt odniesienia stosowany jest agent wybierający akcję
+(parę do zamiany) jednostajnie losowo na każdym kroku.
+Nie uczy się ani nie zapamiętuje historii; służy wyłącznie do
+kwantyfikacji szumu w przestrzeni przeszukiwań.
+
+\subsection{Agent zachłanny (Greedy)}
+
+Na każdym kroku agent wyczerpująco sprawdza wszystkie $\binom{n}{2}$
+możliwych zamian i wybiera tę, która przynosi największą natychmiastową
+redukcję kosztu.
+Złożoność jednego kroku wynosi $O(n^2)$, co czyni agenta powolnym dla
+dużych $n$, ale gwarantuje monotoniczne zmniejszanie kosztu.
+
+\subsection{Wyżarzanie symulowane (SA)}
+
+Wyżarzanie symulowane przeszukuje przestrzeń
+permutacji, akceptując ruchy pogarszające z prawdopodobieństwem zależnym
+od temperatury.
+
+\subsubsection*{Harmonogram temperatury}
+
+Projekt stosuje \emph{oscylujący} harmonogram temperatury:
+\begin{equation}
+  T(t) = T_0 \cdot e^{-b \cdot t} + c \cdot \sin^2\!\left(\frac{t}{d}\right),
+  \label{eq:temperature}
+\end{equation}
+gdzie:
+\begin{itemize}[noitemsep]
+  \item $T_0$ — temperatura początkowa,
+  \item $b$ — współczynnik wykładniczego zaniku,
+  \item $c$ — amplituda periodycznego podgrzewania (sinusoidalnego),
+  \item $d$ — okres podgrzewania (w krokach),
+  \item $T_{\min}$ — dolne ograniczenie temperatury.
+\end{itemize}
+
+Ruch do sąsiedniego harmonogramu $\pi'$ (różniącego się jedną zamianą) jest
+akceptowany zawsze, gdy $C(\pi') \leq C(\pi)$, albo z prawdopodobieństwem
+$\exp\!\bigl(-\Delta C / T(t)\bigr)$ w przeciwnym razie.
+
+Sinusoidalny człon $c \cdot \sin^2(t/d)$ wprowadza periodyczne skoki
+temperatury (podgrzewanie), które pomagają agentowi uciekać z lokalnych
+minimów.
+
+\subsubsection*{Hiperparametry SA}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parametr} & \textbf{Zakres} & \textbf{Wpływ} \\
+\midrule
+$T_0$      & $[1, 10000]$   & Swoboda eksploracji na początku \\
+$b$        & $[10^{-6}, 0{,}1]$ & Szybkość chłodzenia \\
+$c$        & $[0, 100]$     & Intensywność podgrzewania \\
+$d$        & $[1, 500]$     & Częstotliwość podgrzewania \\
+$T_{\min}$ & $[10^{-8}, 1]$ & Minimalna temperatura \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Algorytm genetyczny (GA)}
+
+Algorytm genetyczny utrzymuje populację kandydatów
+(permutacji) i ewoluuje ją przez selekcję, krzyżowanie i mutację.
+
+\subsubsection*{Operatory genetyczne}
+
+\begin{description}[style=nextline]
+  \item[\normalfont\textit{Krzyżowanie (Order Crossover, OX)}]
+    Wybierane jest losowe okno w permutacji rodzica~1; geny z okna są
+    kopiowane bezpośrednio do potomka.
+    Pozostałe pozycje uzupełniane są zadaniami z rodzica~2 w kolejności ich
+    występowania, pomijając już wstawione.
+    OX zachowuje względną kolejność zadań i nie tworzy zduplikowanych genów.
+    Operacja krzyżowania całego pokolenia jest wykonywana w jednym wywołaniu
+    rozszerzenia C (\texttt{crossover\_opt.c}), co znacznie skraca czas
+    obliczeń.
+
+  \item[\normalfont\textit{Mutacja}]
+    Z prawdopodobieństwem \texttt{mutation\_rate} losowa para pozycji
+    w potomku jest zamieniana miejscami.
+
+  \item[\normalfont\textit{Elityzm}]
+    Najlepszych \texttt{elite\_size} osobników jest kopiowanych do kolejnego
+    pokolenia bez zmian.
+\end{description}
+
+\subsubsection*{Osadzenie GA w epizodzie}
+
+GA nie działa niezależnie, lecz jako \emph{wewnętrzna pętla optymalizacji}
+uruchamiana co \texttt{reoptimize\_every} kroków epizodu.
+Całkowita liczba pokoleń GA wynosi zatem:
+\[
+  \text{pokolenia łącznie} = \left\lfloor \frac{\texttt{max\_steps}}
+  {\texttt{reoptimize\_every}} \right\rfloor \times \texttt{generations}.
+\]
+
+\subsubsection*{Hiperparametry GA}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parametr} & \textbf{Zakres} & \textbf{Wpływ} \\
+\midrule
+\texttt{population\_size}   & $[10, 500]$  & Szerokość przeszukiwania \\
+\texttt{generations}        & $[1, 100]$   & Głębokość przeszukiwania \\
+\texttt{mutation\_rate}     & $[0, 1]$     & Różnorodność populacji \\
+\texttt{elite\_size}        & $[1, 20]$    & Zachowanie najlepszych \\
+\texttt{reoptimize\_every}  & $[1, 20]$    & Częstość uruchamiania GA \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{GEPA — automatyczna optymalizacja hiperparametrów przez LLM}
+
+\subsubsection*{Motywacja}
+
+Wyniki SA i GA są silnie uzależnione od wyboru hiperparametrów.
+Ręczne strojenie jest kosztowne i wymaga ekspertyzy dziedzinowej.
+Framework GEPA zastępuje ten proces pętlą refleksji LLM,
+w której model językowy analizuje wyniki ewaluacji i proponuje ulepszoną
+konfigurację.
+
+\subsubsection*{Pętla optymalizacji GEPA}
+
+\begin{enumerate}
+  \item \textbf{Inicjalizacja:} ziarno konfiguracji (domyślne hiperparametry)
+        jest przekazywane do GEPA.
+  \item \textbf{Ewaluacja bieżącej konfiguracji:} agent jest uruchamiany
+        na losowym podzbiorze instancji treningowych; wynik jest zapisywany.
+  \item \textbf{Refleksja LLM:} bieżąca konfiguracja, wyniki ewaluacji
+        (poprawa\%, wzorzec zbieżności, czas) oraz prompt dziedzinowy
+        są przekazywane do LLM.  Model odpowiada obiektem JSON z propozycją
+        nowych wartości hiperparametrów.
+  \item \textbf{Akceptacja / odrzucenie:} nowa konfiguracja jest ewaluowana
+        na tym samym podzbiorze i porównywana z bieżącą.
+        Jeśli wynik złożony (jakość $-$ kara za czas) jest wyższy,
+        konfiguracja zostaje zaakceptowana.
+  \item Kroki 2--4 są powtarzane aż do wyczerpania budżetu
+        (\texttt{max\_metric\_calls}).
+  \item \textbf{Walidacja:} najlepsza znaleziona konfiguracja jest
+        ewaluowana na pełnym zbiorze walidacyjnym.
+\end{enumerate}
+
+\subsubsection*{Funkcja oceny (score)}
+
+Ocena złożona uwzględnia zarówno jakość rozwiązania, jak i czas wykonania:
+\begin{equation}
+  \text{score} = \underbrace{\frac{C_0 - C^*}{C_0}}_{\text{jakość}}
+               - \alpha \cdot \underbrace{\frac{t}{t_{\max}}}_{\text{norma czasu}},
+  \label{eq:score}
+\end{equation}
+gdzie $C_0$ to koszt rozwiązania zachłannego, $C^*$ to najlepszy znaleziony
+koszt, $t$ to czas jednego uruchomienia agenta, $t_{\max}$ to maksymalny
+czas obserwowany dotychczas, a $\alpha = 0{,}2$ to waga kary za czas.
+
+\subsubsection*{Modele LLM}
+
+GEPA komunikuje się z modelem przez interfejs LiteLLM.
+Projekt obsługuje modele Ollama uruchamiane lokalnie:
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Model} & \textbf{Klucz CLI} \\
+\midrule
+Qwen3 4B Instruct  & \texttt{ollama/qwen3:4b-instruct-2507-q4\_K\_M} \\
+Gemma4 2B          & \texttt{ollama/gemma4:e2b} \\
+Phi4-mini          & \texttt{ollama/phi4-mini-reasoning:latest} \\
+Granite4 1B        & \texttt{ollama/granite4:1b-h-q8\_0} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection*{Prompt refleksji}
+
+Prompt dostarczany modelowi zawiera:
+\begin{enumerate}[noitemsep]
+  \item Opis semantyczny hiperparametrów i ich zakresy dopuszczalnych wartości.
+  \item Wskazówki dotyczące interpretacji wyników (poprawa\%, wzorzec zbieżności,
+        stosunek liczby korzystnych ruchów do wszystkich kroków).
+  \item Strategię eksploracji — model jest instruowany, by proponować
+        \emph{istotnie różne} konfiguracje od bieżącej i nie powtarzać
+        wcześniej odrzuconych.
+  \item Bieżącą konfigurację hiperparametrów i wyniki ewaluacji na instancjach
+        treningowych.
+\end{enumerate}
+
+Model odpowiada \emph{wyłącznie} obiektem JSON z nowymi wartościami
+hiperparametrów.  Odpowiedzi nieparsowalne są zastępowane losową konfiguracją
+z dopuszczalnego zakresu, co pozwala kontynuować optymalizację nawet
+w przypadku słabszych modeli.
+
+% ---------------------------------------------------------------------------
+\section{Optymalizacje implementacyjne}
+% ---------------------------------------------------------------------------
+
+\subsection{Rozszerzenia C}
+
+Krytyczna ścieżka obliczeniowa (ewaluacja kosztu i krzyżowanie OX) jest
+zrealizowana jako rozszerzenia Pythona skompilowane z C:
+
+\begin{description}[style=nextline]
+  \item[\texttt{evaluate\_opt.c}]
+    Ewaluacja kosztu permutacji i przyrostowa kalkulacja $\Delta C$ dla
+    pojedynczej zamiany w jednym wywołaniu C, bez alokacji Pythona.
+  \item[\texttt{crossover\_opt.c}]
+    Krzyżowanie OX całego pokolenia ($k \times n$) w jednym wywołaniu C,
+    zwracające tablicę \texttt{int64} bez pośrednictwa Pythona.
+\end{description}
+
+\subsection{Redukcja narzutu oceny}
+
+Podczas treningu GEPA każda konfiguracja jest ewaluowana \textbf{3-krotnie}
+i uśredniana, co redukuje wpływ szumu stochastycznego bez nadmiernego
+wydłużania czasu obliczeń.
+
+\begin{thebibliography}{1}
+
+\bibitem{biskup1998}
+D.~Biskup, M.~Feldmann,
+\textit{Benchmarks for scheduling on a single-machine against restrictive and
+unrestrictive common due dates},
+Discussion Paper No.~397, University of Bielefeld, August 1998.
+
+\end{thebibliography}
+
+\end{document}
