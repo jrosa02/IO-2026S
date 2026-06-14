@@ -1,0 +1,543 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{lmodern}
+\usepackage{parskip}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\graphicspath{{docs/figures/}}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{colortbl}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black,
+    citecolor=blue!60!black,
+}
+
+\titleformat{\section}{\large\bfseries}{}{0pt}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{}{0pt}{}
+
+% Placeholder command for missing data
+\newcommand{\todo}[1]{\colorbox{yellow!40}{\textit{[TODO: #1]}}}
+\newcommand{\placeholder}{\multicolumn{1}{c}{\textcolor{gray}{---}}}
+
+\title{\textbf{Wyniki eksperymentów — harmonogramowanie ze wspólnym terminem}\\[4pt]
+    \large Porównanie agentów i odniesienie do benchmarku Biskupa i Feldmanna}
+\author{Karolina Piotrowska, Jan Rosa}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ===========================================================================
+\section{Konfiguracja eksperymentów}
+% ===========================================================================
+
+\subsection{Eksperyment przesiewowy (sweep)}
+
+Eksperyment przesiewowy przeprowadzono w celu porównania czterech agentów
+optymalizacyjnych w połączeniu z pięcioma modelami językowymi sterującymi
+frameworkiem GEPA.
+Parametry stałe dla wszystkich uruchomień:
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parametr} & \textbf{Wartość} \\
+\midrule
+Zbiór danych              & \texttt{sch1000.txt} (instancje $k = 1\ldots5$) \\
+Współczynnik szczelności  & $h = 0{,}4$ \\
+Liczba instancji          & 5 (benchmarkowanie) \\
+Liczba instancji treningowych & 5 (trening GEPA) \\
+Maksymalna liczba kroków  & 5\,000 \\
+Budżet wywołań GEPA       & 100 wywołań metryki \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Porównywane modele LLM (uruchamiane lokalnie przez Ollama):
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Model} & \textbf{Klucz LiteLLM} \\
+\midrule
+Qwen3 4B          & \texttt{ollama/qwen3:4b-instruct-2507-q4\_K\_M} \\
+Gemma4 2B         & \texttt{ollama/gemma4:e2b} \\
+Phi4-mini         & \texttt{ollama/phi4-mini-reasoning:latest} \\
+Granite4 1B       & \texttt{ollama/granite4:1b-h-q8\_0} \\
+GPT-OSS 120B      & \texttt{ollama/gpt-oss:120b} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Eksperyment porównawczy z benchmarkiem}
+
+Eksperyment przeprowadzono w celu odniesienia wyników GEPA-SA do
+górnych ograniczeń opublikowanych przez Biskupa i Feldmanna~\cite{biskup2001}.
+Parametry:
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parametr} & \textbf{Wartość} \\
+\midrule
+Zbiór danych              & \texttt{sch1000.txt} (instancje $k = 1\ldots10$) \\
+Współczynniki szczelności & $h \in \{0{,}2;\; 0{,}4;\; 0{,}6;\; 0{,}8\}$ \\
+Liczba instancji          & 10 \\
+Liczba instancji treningowych & 10 \\
+Maksymalna liczba kroków  & 5\,000 \\
+Budżet wywołań GEPA       & 100 wywołań metryki \\
+Agent / model LLM         & GEPA-SA z modelem Granite4~1B \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Metryka porównawcza to \emph{odchylenie względne} od górnego ograniczenia:
+\begin{equation}
+  \Delta_{\%}(k, h) = \frac{C^*_{\text{GEPA-SA}}(k, h) - \text{GG}(k, h)}
+                           {\text{GG}(k, h)} \times 100\%,
+  \label{eq:gap}
+\end{equation}
+gdzie $C^*_{\text{GEPA-SA}}(k,h)$ to najlepszy koszt znaleziony przez GEPA-SA
+na instancji $k$ przy współczynniku $h$, a $\text{GG}(k,h)$ to górne
+ograniczenie z publikacji~\cite{biskup2001}.
+Wartość ujemna oznacza pobicie opublikowanego górnego ograniczenia.
+
+% ===========================================================================
+\section{Eksperyment przesiewowy — porównanie modeli LLM}
+% ===========================================================================
+
+\subsection{Zbiorcze zestawienie wyników}
+
+Tabela~\ref{tab:sweep_main} przedstawia średnią procentową poprawę kosztu
+względem punktu startowego (inicjalizacja zachłanna) dla każdego agenta
+i każdego modelu LLM.
+Kolumna $\Delta$ oznacza zysk z zastosowania GEPA w stosunku do bazowej
+metaheurystyki (SA lub GA).
+
+\begin{table}[h]
+\centering
+\caption{Średnia poprawa kosztu [\%] — \texttt{sch1000}, $h=0{,}4$,
+         $n=5$ instancji, 5\,000 kroków.}
+\label{tab:sweep_main}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+\multirow{2}{*}{\textbf{Model LLM}}
+  & \multicolumn{3}{c}{\textbf{Wyżarzanie symulowane}}
+  & \multicolumn{3}{c}{\textbf{Algorytm genetyczny}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+  & SA & GEPA-SA & $\Delta$ & Genetic & GEPA-GA & $\Delta$ \\
+\midrule
+Qwen3 4B         & 63{,}60\% & 63{,}51\% & $-0{,}10$\% &  8{,}78\% & 31{,}49\% & $+22{,}71$\% \\
+Granite4 1B      & 62{,}93\% & 63{,}08\% & $+0{,}15$\% &  8{,}98\% & 30{,}34\% & $+21{,}36$\% \\
+GPT-OSS 120B     & 62{,}58\% & 62{,}34\% & $-0{,}24$\% &  9{,}36\% & 28{,}57\% & $+19{,}20$\% \\
+Phi4-mini        & 62{,}31\% & 62{,}78\% & $+0{,}47$\% & 11{,}91\% & 19{,}76\% &  $+7{,}85$\% \\
+Gemma4 2B        & 62{,}71\% & 62{,}09\% & $-0{,}62$\% &  8{,}65\% & 10{,}94\% &  $+2{,}29$\% \\
+\midrule
+\textbf{Średnia} & \textbf{62{,}83\%} & \textbf{62{,}76\%} & $-0{,}07$\%
+                 & \textbf{9{,}54\%}  & \textbf{24{,}22\%} & $+14{,}68$\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{qwen3_agent_comparison}
+\caption{Porównanie agentów dla modelu Qwen3 4B (\texttt{sch1000}, $h=0{,}4$, $n=5$ instancji).
+  \emph{Lewy panel}: średnia poprawa kosztu [\%] z odchyleniem standardowym.
+  \emph{Prawy panel}: rozkład najlepszego znalezionego kosztu (boxplot; im niżej, tym lepiej).
+  SA i GEPA-SA osiągają niemal identyczny poziom, podczas gdy GEPA-GA znacząco
+  przewyższa bazowy Genetic, ale z dużą wariancją między instancjami.}
+\label{fig:agent_comparison}
+\end{figure}
+
+\subsection{Wyżarzanie symulowane (SA i GEPA-SA)}
+
+We wszystkich uruchomieniach SA osiąga średnią poprawę kosztu na poziomie
+$62{,}3$–$63{,}6\%$, niezależnie od modelu LLM.
+GEPA-SA nie przynosi istotnej poprawy względem bazowego SA
+($|\Delta| < 0{,}7\%$ we wszystkich przypadkach), co wskazuje, że
+domyślna konfiguracja hiperparametrów wyżarzania jest już bliska optimum
+dla danego budżetu kroków.
+
+Godnym uwagi wyjątkiem jest model Gemma4, dla którego GEPA-SA wykonuje
+wyraźnie mniej korzystnych ruchów (średnio ok.\ 2\,712 na 5\,000 kroków
+wobec $\sim$4\,600 dla pozostałych modeli), ale osiąga zbliżony koszt
+końcowy — sugeruje to, że Gemma4 proponuje konfigurację z agresywniejszym
+poszukiwaniem, wykonującą rzadsze lecz większe skoki.
+
+\begin{table}[h]
+\centering
+\caption{Średnia liczba zaakceptowanych ruchów na epizod (SA vs.\ GEPA-SA).}
+\label{tab:sa_nimprov}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Model LLM} & \textbf{SA} & \textbf{GEPA-SA} \\
+\midrule
+Qwen3 4B      & 4\,608 & 4\,611 \\
+Granite4 1B   & 4\,634 & 4\,611 \\
+GPT-OSS 120B  & 4\,629 & 4\,320 \\
+Phi4-mini     & 4\,615 & 4\,621 \\
+Gemma4 2B     & 4\,630 & 2\,712 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{qwen3_convergence}
+\caption{Krzywe zbieżności kosztu dla wszystkich agentów — Qwen3 4B
+  (\texttt{sch1000}, $h=0{,}4$, $n=5$ instancji, 5\,000 kroków).
+  Linia ciągła to średnia po instancjach, pasmo to $\pm 1\sigma$,
+  linia przerywana to najlepszy wynik spośród instancji.
+  SA i GEPA-SA zbiegają gwałtownie w pierwszych $\sim$500 krokach
+  i osiągają stabilny poziom kosztu $\approx 7{,}3 \times 10^6$.
+  GEPA-GA zbiega wolniej i ze znacznie wyższą wariancją.
+  Bazowy Genetic praktycznie nie poprawia kosztu po pierwszych 1000 krokach.}
+\label{fig:convergence}
+\end{figure}
+
+\subsection{Algorytm genetyczny (Genetic i GEPA-GA)}
+
+Bazowy algorytm genetyczny z domyślnymi hiperparametrami osiąga jedynie
+$8{,}7$–$11{,}9\%$ poprawy, co czyni go znacznie słabszym od SA.
+GEPA-GA poprawia ten wynik istotnie, ale jakość zależy silnie od modelu LLM.
+
+\begin{table}[h]
+\centering
+\caption{Szczegóły GEPA-GA: zakres i zmienność poprawy kosztu
+         (\texttt{sch1000}, $h=0{,}4$, $n=5$ instancji).}
+\label{tab:gepaga_detail}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Model LLM} & \textbf{min} & \textbf{śr.} & \textbf{max}
+                   & \textbf{śr.\ $n_{\text{impv}}$} \\
+\midrule
+Qwen3 4B      &  3{,}75\% & 31{,}49\% & 42{,}75\% &   943 \\
+Granite4 1B   & 14{,}56\% & 30{,}34\% & 46{,}16\% &   811 \\
+GPT-OSS 120B  &  2{,}37\% & 28{,}57\% & 49{,}25\% &   724 \\
+Phi4-mini     & 16{,}57\% & 19{,}76\% & 22{,}95\% &   251 \\
+Gemma4 2B     &  5{,}46\% & 10{,}94\% & 14{,}79\% &   140 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{qwen3_gepa_ga_history}
+\caption{Historia optymalizacji GEPA-GA przy modelu Qwen3 4B (32 wywołania metryki).
+  \emph{Górny lewy}: wynik złożony (score) każdego wywołania i kumulatywne optimum.
+  \emph{Górny prawy}: rozrzut poprawy kosztu po instancjach dla kolejnych wywołań.
+  \emph{Dolny lewy}: ewolucja hiperparametrów GA (wartości unormowane do $[0,1]$).
+  Już w pierwszej iteracji GEPA skacze z konfiguracji domyślnej ($\sim$3\%) do
+  $\sim$56\% poprawy kosztu — znajdując \texttt{population\_size=50}, \texttt{generations=10},
+  co odpowiada agresywnemu przeszukiwaniu populacyjnemu.}
+\label{fig:gepa_ga_qwen3}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{gemma4_gepa_ga_history}
+\caption{Historia optymalizacji GEPA-GA przy modelu Gemma4 2B (32 wywołania metryki) —
+  przypadek kontrastowy wobec Rys.~\ref{fig:gepa_ga_qwen3}.
+  Skala osi Y jest znacznie węższa (0--20\% vs.\ 0--60\%):
+  Gemma4 nie jest w stanie wyprowadzić GA poza $\sim$14\% poprawy.
+  Hiperparametry oscylują blisko wartości domyślnych przez cały przebieg optymalizacji,
+  co wskazuje na niezdolność modelu do zaproponowania jakościowo nowych konfiguracji.}
+\label{fig:gepa_ga_gemma4}
+\end{figure}
+
+Obserwacje:
+
+\begin{itemize}
+  \item \textbf{Qwen3, Granite4, GPT-OSS} — modele te proponują konfiguracje
+        dające wysoką średnią poprawę ($\sim$29–31\%), ale z dużą wariancją
+        między instancjami (nawet $2$–$5\%$ dla niektórych).
+        Sugeruje to wrażliwość znalezionych konfiguracji GA na konkretną
+        instancję problemu.
+
+  \item \textbf{Phi4-mini} — najniższa wariancja ($16$–$23\%$) kosztem
+        niższego sufitu.  Model proponuje zachowawcze, stabilne konfiguracje.
+
+  \item \textbf{Gemma4} — efekt GEPA jest znikomy ($+2{,}3$ pp.\ ponad
+        bazowy GA).  Model nie jest w stanie wygenerować konfiguracji
+        wyraźnie lepszych od wartości domyślnych.
+\end{itemize}
+
+\subsection{Wnioski z eksperymentu przesiewowego}
+
+\begin{enumerate}[label=\arabic*.]
+  \item SA zdecydowanie dominuje nad GA przy 5\,000 krokach —
+        różnica wynosi ponad 30 punktów procentowych.
+  \item GEPA nie przynosi zysku dla SA (domyślna konfiguracja jest
+        wystarczająco dobra); dla GA zysk jest znaczący i zależny od modelu.
+  \item Qwen3 4B i Granite4 1B oferują najlepszy stosunek jakości do
+        zasobów (oba modele $\leq 2$ B parametrów, lokalne, bez opóźnień API).
+  \item GPT-OSS 120B pomimo rozmiaru nie przewyższa Qwen3 4B, a wykazuje
+        wyższą wariancję wyników GEPA-GA.
+\end{enumerate}
+
+% ===========================================================================
+\section{Porównanie z benchmarkiem Biskupa i Feldmanna}
+% ===========================================================================
+
+\subsection{Górne ograniczenia z publikacji}
+
+Tabela~\ref{tab:bishop_ub} zawiera górne ograniczenia wartości funkcji celu
+dla 10 instancji o $n = 1000$ zadaniach, wyznaczone przez Biskupa i Feldmanna
+heurystyką~II~\cite{biskup2001} (Tabela~9 w publikacji).
+Wartości te są górną granicą optymalnego rozwiązania — algorytm, który
+osiągnie koszt niższy od podanego, poprawia dotychczas znany wynik.
+
+\begin{table}[h]
+\centering
+\caption{Górne ograniczenia dla $n = 1000$ (Tabela~9 z~\cite{biskup2001}).
+         Wszystkie wartości uzyskane heurystyką~II.}
+\label{tab:bishop_ub}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+$k$ & $h = 0{,}2$ & $h = 0{,}4$ & $h = 0{,}6$ & $h = 0{,}8$ \\
+\midrule
+ 1 & 15\,190\,371 &  8\,570\,154 & 6\,411\,581 & 6\,411\,581 \\
+ 2 & 13\,356\,727 &  7\,592\,040 & 6\,112\,598 & 6\,112\,598 \\
+ 3 & 12\,919\,259 &  7\,313\,736 & 5\,985\,538 & 5\,985\,538 \\
+ 4 & 12\,705\,290 &  7\,300\,217 & 6\,096\,729 & 6\,096\,729 \\
+ 5 & 13\,276\,868 &  7\,738\,367 & 6\,348\,242 & 6\,348\,242 \\
+ 6 & 12\,236\,080 &  7\,144\,491 & 6\,082\,142 & 6\,082\,142 \\
+ 7 & 14\,160\,773 &  8\,426\,024 & 6\,575\,879 & 6\,575\,879 \\
+ 8 & 13\,314\,723 &  7\,508\,507 & 6\,069\,658 & 6\,069\,658 \\
+ 9 & 12\,433\,821 &  7\,299\,271 & 6\,188\,416 & 6\,188\,416 \\
+10 & 13\,395\,234 &  7\,617\,658 & 6\,147\,295 & 6\,147\,295 \\
+\midrule
+\textbf{Śr.}
+   & 13\,298\,945 &  7\,651\,047 & 6\,201\,808 & 6\,201\,808 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Uwaga: dla $h = 0{,}6$ i $h = 0{,}8$ wartości górnych ograniczeń są
+identyczne dla każdej instancji.
+Jest to wynik szczelności terminu — przy wystarczająco luźnym terminie
+optymalny harmonogram staje się niezależny od dokładnej wartości $h$.
+
+\subsection{Wyniki GEPA-SA}
+
+Tabele~\ref{tab:h02}--\ref{tab:h08} zawierają najlepszy koszt znaleziony przez
+GEPA-SA dla każdej z 10 instancji oraz odchylenie względne $\Delta_{\%}$
+(wzór~\ref{eq:gap}) od górnego ograniczenia Biskupa i Feldmanna.
+Wartość ujemna oznacza pobicie opublikowanego ograniczenia.
+Użyto modelu Granite4~1B — najlepszego modelu w eksperymencie przesiewowym
+pod względem poprawy GEPA-GA; dla samego GEPA-SA różnice między modelami
+są poniżej $0{,}5$ pp., więc wybór modelu nie ma tu istotnego wpływu.
+
+% ---- h = 0.2 ---------------------------------------------------------------
+\begin{table}[ht]
+\centering
+\caption{Wyniki dla $h = 0{,}2$ — \texttt{sch1000}, 5\,000 kroków, Granite4~1B.}
+\label{tab:h02}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$k$ & GG (Biskup) & $C^*_{\text{GEPA-SA}}$ & $\Delta_{\text{GEPA-SA}}$ \\
+\midrule
+ 1 & 15\,190\,371 & 14\,077\,332 & $-7{,}33\%$ \\
+ 2 & 13\,356\,727 & 12\,318\,195 & $-7{,}78\%$ \\
+ 3 & 12\,919\,259 & 11\,991\,068 & $-7{,}18\%$ \\
+ 4 & 12\,705\,290 & 11\,819\,056 & $-6{,}98\%$ \\
+ 5 & 13\,276\,868 & 12\,475\,975 & $-6{,}03\%$ \\
+ 6 & 12\,236\,080 & 11\,669\,284 & $-4{,}63\%$ \\
+ 7 & 14\,160\,773 & 13\,299\,127 & $-6{,}08\%$ \\
+ 8 & 13\,314\,723 & 12\,295\,773 & $-7{,}65\%$ \\
+ 9 & 12\,433\,821 & 11\,782\,948 & $-5{,}23\%$ \\
+10 & 13\,395\,234 & 12\,450\,882 & $-7{,}05\%$ \\
+\midrule
+\textbf{Śr.} & 13\,298\,915 & 12\,417\,964 & $\mathbf{-6{,}62\%}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- h = 0.4 ---------------------------------------------------------------
+\begin{table}[ht]
+\centering
+\caption{Wyniki dla $h = 0{,}4$ — \texttt{sch1000}, 5\,000 kroków, Granite4~1B.}
+\label{tab:h04}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$k$ & GG (Biskup) & $C^*_{\text{GEPA-SA}}$ & $\Delta_{\text{GEPA-SA}}$ \\
+\midrule
+ 1 &  8\,570\,154 &  8\,128\,044 & $-5{,}16\%$ \\
+ 2 &  7\,592\,040 &  7\,293\,467 & $-3{,}93\%$ \\
+ 3 &  7\,313\,736 &  7\,009\,299 & $-4{,}16\%$ \\
+ 4 &  7\,300\,217 &  7\,055\,303 & $-3{,}35\%$ \\
+ 5 &  7\,738\,367 &  7\,385\,882 & $-4{,}56\%$ \\
+ 6 &  7\,144\,491 &  6\,951\,632 & $-2{,}70\%$ \\
+ 7 &  8\,426\,024 &  7\,886\,057 & $-6{,}41\%$ \\
+ 8 &  7\,508\,507 &  7\,256\,262 & $-3{,}36\%$ \\
+ 9 &  7\,299\,271 &  7\,086\,209 & $-2{,}92\%$ \\
+10 &  7\,617\,658 &  7\,309\,020 & $-4{,}05\%$ \\
+\midrule
+\textbf{Śr.} & 7\,651\,047 & 7\,336\,118 & $\mathbf{-4{,}12\%}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- h = 0.6 ---------------------------------------------------------------
+\begin{table}[ht]
+\centering
+\caption{Wyniki dla $h = 0{,}6$ — \texttt{sch1000}, 5\,000 kroków, Granite4~1B.}
+\label{tab:h06}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$k$ & GG (Biskup) & $C^*_{\text{GEPA-SA}}$ & $\Delta_{\text{GEPA-SA}}$ \\
+\midrule
+ 1 & 6\,411\,581 & 6\,445\,488 & $+0{,}53\%$ \\
+ 2 & 6\,112\,598 & 6\,187\,801 & $+1{,}23\%$ \\
+ 3 & 5\,985\,538 & 6\,099\,638 & $+1{,}91\%$ \\
+ 4 & 6\,096\,729 & 6\,224\,106 & $+2{,}09\%$ \\
+ 5 & 6\,348\,242 & 6\,479\,263 & $+2{,}06\%$ \\
+ 6 & 6\,082\,142 & 6\,251\,208 & $+2{,}78\%$ \\
+ 7 & 6\,575\,879 & 6\,639\,210 & $+0{,}96\%$ \\
+ 8 & 6\,069\,658 & 6\,306\,187 & $+3{,}90\%$ \\
+ 9 & 6\,188\,416 & 6\,182\,658 & $-0{,}09\%$ \\
+10 & 6\,147\,295 & 6\,250\,481 & $+1{,}68\%$ \\
+\midrule
+\textbf{Śr.} & 6\,201\,808 & 6\,306\,604 & $\mathbf{+1{,}69\%}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- h = 0.8 ---------------------------------------------------------------
+\begin{table}[ht]
+\centering
+\caption{Wyniki dla $h = 0{,}8$ — \texttt{sch1000}, 5\,000 kroków, Granite4~1B.}
+\label{tab:h08}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$k$ & GG (Biskup) & $C^*_{\text{GEPA-SA}}$ & $\Delta_{\text{GEPA-SA}}$ \\
+\midrule
+ 1 & 6\,411\,581 & 8\,609\,536 & $+34{,}28\%$ \\
+ 2 & 6\,112\,598 & 8\,507\,317 & $+39{,}18\%$ \\
+ 3 & 5\,985\,538 & 8\,729\,646 & $+45{,}85\%$ \\
+ 4 & 6\,096\,729 & 8\,785\,082 & $+44{,}10\%$ \\
+ 5 & 6\,348\,242 & 9\,199\,654 & $+44{,}92\%$ \\
+ 6 & 6\,082\,142 & 9\,060\,791 & $+48{,}97\%$ \\
+ 7 & 6\,575\,879 & 9\,145\,941 & $+39{,}08\%$ \\
+ 8 & 6\,069\,658 & 8\,652\,371 & $+42{,}55\%$ \\
+ 9 & 6\,188\,416 & 8\,771\,697 & $+41{,}74\%$ \\
+10 & 6\,147\,295 & 8\,804\,172 & $+43{,}22\%$ \\
+\midrule
+\textbf{Śr.} & 6\,201\,808 & 8\,826\,621 & $\mathbf{+42{,}32\%}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Zestawienie zbiorcze}
+
+Tabela~\ref{tab:summary} zbiera średnie wyniki dla wszystkich czterech
+wartości $h$.
+
+\begin{table}[ht]
+\centering
+\caption{Zestawienie zbiorcze — średnie wyniki po 10 instancjach
+         (\texttt{sch1000}, 5\,000 kroków, Granite4~1B).}
+\label{tab:summary}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+$h$ & GG śr.\ (Biskup) & $C^*$ śr.\ GEPA-SA & $\Delta$ GEPA-SA \\
+\midrule
+0{,}2 & 13\,298\,915 & 12\,417\,964 & $-6{,}62\%$ \\
+0{,}4 &  7\,651\,047 &  7\,336\,118 & $-4{,}12\%$ \\
+0{,}6 &  6\,201\,808 &  6\,306\,604 & $+1{,}69\%$ \\
+0{,}8 &  6\,201\,808 &  8\,826\,621 & $+42{,}32\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ===========================================================================
+\section{Wnioski}
+% ===========================================================================
+
+\subsection{Wnioski z eksperymentu przesiewowego}
+
+Wyżarzanie symulowane (SA) okazało się dominującą metodą dla instancji
+\texttt{sch1000} przy 5\,000 krokach — niezależnie od modelu LLM i bez
+istotnej pomocy ze strony GEPA.
+Główna wartość frameworku GEPA ujawnia się przy algorytmie genetycznym,
+gdzie automatyczny dobór hiperparametrów pozwolił potroić skuteczność
+najlepszych modeli (Qwen3, Granite4) w porównaniu z konfiguracją domyślną.
+
+Spośród badanych modeli LLM Qwen3 4B i Granite4 1B wyróżniają się najlepszym
+stosunkiem uzyskanej jakości do kosztu obliczeniowego (oba modele lokalne,
+$\leq 2$B parametrów).
+
+\subsection{Wnioski z porównania z benchmarkiem}
+
+Wyniki zestawione w Tabelach~\ref{tab:h02}--\ref{tab:h08} prowadzą do
+następujących wniosków:
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Napięty termin ($h = 0{,}2$ i $h = 0{,}4$) — GEPA-SA
+        pokonuje górne ograniczenia Biskupa.}
+        Przy $h = 0{,}2$ GEPA-SA osiąga średnio $-6{,}62\%$ poniżej opublikowanego
+        górnego ograniczenia (zakres $-4{,}63\%$ do $-7{,}78\%$).
+        Przy $h = 0{,}4$ analogicznie $-4{,}12\%$ (zakres $-2{,}70\%$ do $-6{,}41\%$).
+        Oznacza to, że wyżarzanie symulowane przy 5\,000 krokach jest silniejszą
+        heurystyką niż obie metody zaproponowane przez Biskupa i Feldmanna
+        dla napiętych terminów.
+
+  \item \textbf{Umiarkowanie luźny termin ($h = 0{,}6$) — GEPA-SA nieznacznie
+        powyżej górnego ograniczenia.}
+        Średnia luka wynosi $+1{,}69\%$ — GEPA-SA jest o ok.\ 2\% gorszy od
+        heurystyki Biskupa.  Różnica jest mała, ale jednolita dla wszystkich
+        10 instancji (jedyny wyjątek: $k = 9$, gdzie GEPA-SA uzyskuje $-0{,}09\%$).
+        Wynik sugeruje, że SA gorzej radzi sobie ze strukturą V-kształtną
+        optymalnego harmonogramu przy luźnym terminie.
+
+  \item \textbf{Bardzo luźny termin ($h = 0{,}8$) — SA znacząco poniżej
+        górnego ograniczenia.}
+        Luka wynosi średnio $+42{,}32\%$ — SA daje koszty prawie dwukrotnie
+        wyższe od wartości opublikowanych.
+        Zwraca uwagę, że górne ograniczenia Biskupa dla $h = 0{,}8$ są
+        identyczne jak dla $h = 0{,}6$ (własność nierestrykacyjności terminu),
+        podczas gdy nasze wyniki dla $h = 0{,}8$ są drastycznie gorsze niż
+        dla $h = 0{,}6$.
+        Wskazuje to, że SA z bieżącą inicjalizacją zachłanną i harmonogramem
+        temperatury nie jest przystosowany do optymalizacji przy bardzo luźnych
+        terminach — dominują kary za wczesność, a przestrzeń poszukiwań
+        wymaga innej strategii eksploracji.
+
+  \item \textbf{Dla $h = 0{,}8$ problem leży w algorytmie, nie w hiperparametrach.}
+        Wyniki z eksperymentu przesiewowego pokazują, że GEPA-SA i bazowy SA
+        osiągają niemal identyczne koszty (różnica $< 0{,}1$ pp.)\ niezależnie
+        od wartości $h$.
+        GEPA nie jest w stanie skompensować strukturalnego ograniczenia SA
+        przy bardzo luźnych terminach — konieczna jest zmiana samego algorytmu
+        lub strategii inicjalizacji.
+\end{enumerate}
+
+\begin{thebibliography}{1}
+
+\bibitem{biskup2001}
+D.~Biskup, M.~Feldmann,
+\textit{Benchmarks for scheduling on a single machine against restrictive and
+unrestrictive common due dates},
+Computers \& Operations Research, vol.~28, pp.~787--801, 2001.
+
+\end{thebibliography}
+
+\end{document}

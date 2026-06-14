@@ -165,7 +165,7 @@ oznaczonym znacznikiem czasowym.
     \textit{(tylko GEPA)} Łączny budżet ewaluacji optymalizatora GEPA
     (zlicza każde uruchomienie agent$\times$instancja). \\[4pt]
 
-\texttt{--reflection-lm} & string & \texttt{ollama/qwen3:4b} &
+\texttt{--reflection-lm} & string & \texttt{ollama/qwen3:} \texttt{4b-instruct-} \texttt{2507-q4\_K\_M} &
     \textit{(tylko GEPA)} Identyfikator modelu LiteLLM używanego przez LLM
     do refleksji. Można użyć dowolnego modelu Ollama,
     np.\ \texttt{ollama/gemma4:e2b}. \\[4pt]
@@ -340,8 +340,8 @@ ewaluacji) oraz surową odpowiedź JSON modelu.
 \section{Generator dokumentacji --- \texttt{build\_docs.sh}}
 % ---------------------------------------------------------------------------
 
-Buduje referencję API w formacie HTML z wyszukiwarką oraz tę instrukcję
-użytkownika w formacie PDF.
+Buduje referencję API w formacie HTML z wyszukiwarką oraz wszystkie dokumenty
+LaTeX projektu w formacie PDF.
 
 \begin{lstlisting}[language=bash]
 ./build_docs.sh
@@ -351,14 +351,19 @@ Wyniki:
 \begin{itemize}[noitemsep]
   \item \texttt{docs/\_build/html/index.html} --- HTML Sphinxa z pełnotekstowym
         wyszukiwaniem (motyw Furo).
-  \item \texttt{docs/\_build/io-2026s-api.pdf} --- PDF referencji API przez
-        LaTeX.
+  \item \texttt{docs/\_build/io-2026s-api.pdf} --- PDF referencji API
+        (wygenerowany przez Sphinxa przez LaTeX).
   \item \texttt{docs/\_build/io-2026s-userguide.pdf} --- Niniejsza instrukcja
         użytkownika.
+  \item \texttt{docs/\_build/io-2026s-problem.pdf} --- Opis problemu i metod
+        rozwiązania.
+  \item \texttt{docs/\_build/io-2026s-results.pdf} --- Wyniki eksperymentów
+        i porównanie z benchmarkiem.
 \end{itemize}
 
-Skrypt uruchamia trzy kompilacje Sphinxa (HTML, jednostronicowy HTML, LaTeX)
-oraz osobną kompilację \texttt{pdflatex} dla tej instrukcji.
+Skrypt uruchamia kompilację Sphinxa (HTML i LaTeX) oraz trzy oddzielne
+kompilacje \texttt{pdflatex} (po dwa przebiegi każda, dla poprawnego
+generowania spisów treści i odsyłaczy).
 
 % ---------------------------------------------------------------------------
 \section{Generator diagramów UML --- \texttt{generate\_uml.py}}
@@ -397,19 +402,34 @@ Używaj \texttt{pyinstrument} do szczegółowej analizy wywołań;
 \section{Testy}
 % ---------------------------------------------------------------------------
 
+\subsection{Testy automatyczne (pytest)}
+
 \begin{lstlisting}[language=bash]
-# Uruchom wszystkie testy (ok. 2 s)
-python -m pytest sanity/ -v
+# Uruchom wszystkie testy
+uv run pytest
 
 # Jeden plik
-python -m pytest sanity/sanity_classical_agents.py -v
+uv run pytest tests/test_classical_agents.py -v
 
 # Jeden test
-python -m pytest sanity/sanity_agent.py::test_greedy_agent_solve -v
+uv run pytest tests/test_agent.py::test_greedy_agent_solve -v
 \end{lstlisting}
 
-Testy korzystają z \texttt{data/sch10.txt} (10 zadań) z małą liczbą kroków
-(20--30) dla zachowania szybkości. Cztery zestawy: poprawność środowiska,
+\subsection{Testy dymne (sanity scripts)}
+
+Katalog \texttt{sanity/} zawiera cztery skrypty do ręcznego smoke-testowania
+komponentów na małych instancjach.
+Nie są częścią zestawu pytest --- uruchamia się je bezpośrednio:
+
+\begin{lstlisting}[language=bash]
+python sanity/sanity_sch_env.py
+python sanity/sanity_agent.py
+python sanity/sanity_benchmark.py
+python sanity/sanity_classical_agents.py
+\end{lstlisting}
+
+Skrypty korzystają z \texttt{data/sch10.txt} (10 zadań) z małą liczbą kroków
+(20--30) dla zachowania szybkości. Obejmują: poprawność środowiska,
 interfejs agenta, runner benchmarkowy oraz poprawność SA/GA.
 
 % ---------------------------------------------------------------------------

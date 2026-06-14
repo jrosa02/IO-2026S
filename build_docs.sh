@@ -10,7 +10,9 @@ TEX=TEXMFHOME=/usr/share/texlive/texmf-dist
 uv run sphinx-build -b html  docs/ "$OUT/html"  -q
 uv run sphinx-build -b latex docs/ "$OUT/latex" -q
 env TEXMFHOME=/usr/share/texlive/texmf-dist \
-    make -C "$OUT/latex" all-pdf LATEXOPTS="-interaction=nonstopmode" > /dev/null 2>&1
+    pdflatex -interaction=nonstopmode -output-directory "$OUT/latex" "$OUT/latex/io-2026s.tex" > /dev/null 2>&1
+env TEXMFHOME=/usr/share/texlive/texmf-dist \
+    pdflatex -interaction=nonstopmode -output-directory "$OUT/latex" "$OUT/latex/io-2026s.tex" > /dev/null 2>&1
 cp "$OUT/latex/io-2026s.pdf" "$OUT/io-2026s-api.pdf"
 
 _latex_build() {
@@ -28,8 +30,10 @@ _latex_build() {
 
 _latex_build docs/userguide.tex "$OUT/userguide" "$OUT/io-2026s-userguide.pdf"
 _latex_build docs/problem.tex   "$OUT/problem"   "$OUT/io-2026s-problem.pdf"
+_latex_build docs/results.tex   "$OUT/results"   "$OUT/io-2026s-results.pdf"
 
 echo "HTML         : $OUT/html/index.html"
 echo "API PDF      : $OUT/io-2026s-api.pdf"
 echo "Guide PDF    : $OUT/io-2026s-userguide.pdf"
 echo "Problem PDF  : $OUT/io-2026s-problem.pdf"
+echo "Results PDF  : $OUT/io-2026s-results.pdf"
